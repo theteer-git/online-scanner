@@ -1,0 +1,23 @@
+BACKGROUND REMOVER V2 DEPLOYMENT
+
+1. Extract this ZIP.
+2. Copy all extracted files into D:\cam and allow replacement.
+3. Keep D:\cam\.git unchanged.
+4. Verify these files exist:
+   D:\cam\background-remover.html
+   D:\cam\assets\js\background\app-v2.js
+   D:\cam\assets\css\background-remover-v2.css
+   D:\cam\_redirects
+
+5. Run:
+   cd /d D:\cam
+   git add .
+   git commit -m "Add professional private background remover V2"
+   git push
+
+6. Wait for Cloudflare Pages deployment to finish.
+7. Open:
+   https://online-scanner.pages.dev/background-remover.html?v=2
+
+IMPORTANT:
+The first removal downloads the model. The image itself remains in browser memory.

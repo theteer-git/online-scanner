@@ -1,5 +1,198 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="description" content="Remove or replace image backgrounds privately in your browser."><meta name="theme-color" content="#ffffff"><title>Private Background Remover</title><link rel="stylesheet" href="./assets/css/background-remover.css"></head><body>
-<header class="header"><a class="brand" href="./"><span class="brand-icon">▣</span><span>OnlineScanner<span>.app</span></span></a><nav><a href="./">Scanner</a><a class="active" href="./background-remover.html">Remove Background</a></nav><span class="privacy"><i></i> Local processing</span></header>
-<main><section id="startView" class="start-view"><div class="hero-icon">◉</div><p class="eyebrow">PRIVATE BACKGROUND REMOVER</p><h1>Remove image backgrounds in your browser</h1><p class="lead">No image upload, no account, and no paid API. The AI model runs on your device.</p><label class="button primary"><input id="imageInput" type="file" accept="image/*" hidden>Choose image</label><div id="dropZone" class="drop-zone" tabindex="0">Drop an image here</div><p class="model-note">First use downloads the AI model. Your selected image is not uploaded.</p></section>
-<section id="editorView" class="editor-view hidden"><div class="top-tools"><button id="newImageButton">＋ New image</button><div class="status-wrap"><span id="statusText">Ready</span><progress id="modelProgress" max="100" value="0" class="hidden"></progress></div><button id="downloadButton" class="download" disabled>Download PNG</button></div><div class="editor-layout"><section class="preview-panel"><div class="preview-stage checkerboard"><canvas id="resultCanvas"></canvas><div id="emptyResult" class="empty-result"><strong>Ready to remove the background</strong><span>Press the button below.</span></div></div><div class="main-actions"><button id="removeButton" class="button primary">Remove background</button><button id="undoButton" class="button secondary" disabled>Undo</button></div></section><aside class="controls"><section class="control-card"><h2>Background</h2><div class="background-options"><button class="background-option active" data-bg="transparent"><span class="transparent-swatch"></span>Transparent</button><button class="background-option" data-bg="white"><span class="color-swatch white"></span>White</button><button class="background-option" data-bg="black"><span class="color-swatch black"></span>Black</button><button class="background-option" data-bg="color"><span class="color-swatch custom"></span>Colour</button><button class="background-option" data-bg="image"><span class="image-swatch">▧</span>Image</button><button class="background-option" data-bg="blur"><span class="image-swatch">◌</span>Blur</button></div><label id="colorControl" class="hidden">Background colour<input id="backgroundColor" type="color" value="#4f86f7"></label><label id="imageControl" class="hidden upload-bg"><input id="backgroundImageInput" type="file" accept="image/*" hidden><span>Choose background image</span></label><label id="blurControl" class="hidden">Blur amount<input id="blurRange" type="range" min="2" max="30" value="12"></label></section><section class="control-card"><h2>Edge</h2><label>Edge softness<input id="softnessRange" type="range" min="0" max="12" value="2"></label><label>Foreground size<input id="expandRange" type="range" min="-8" max="8" value="0"></label></section><section class="privacy-card"><strong>Your image stays on this device</strong><span>Only model files are downloaded. The selected image is processed in browser memory.</span></section></aside></div></section></main>
-<dialog id="errorDialog"><form method="dialog"><h2>Could not process this image</h2><p id="errorMessage"></p><button class="button primary">Close</button></form></dialog><script type="module" src="./assets/js/background/app.js?v=1"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <meta name="description" content="Remove and replace image backgrounds privately in your browser.">
+  <meta name="theme-color" content="#ffffff">
+  <title>Private Background Remover</title>
+  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=2">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="./">
+      <span class="brand-mark">▣</span>
+      <span>OnlineScanner<span class="brand-dot">.app</span></span>
+    </a>
+    <nav class="main-nav">
+      <a href="./">Scanner</a>
+      <a class="active" href="./background-remover.html">Remove Background</a>
+    </nav>
+    <div class="privacy"><span></span>Processed locally</div>
+  </header>
+
+  <main>
+    <section id="welcomeView" class="welcome">
+      <div class="welcome-icon">◉</div>
+      <p class="eyebrow">PRIVATE BACKGROUND REMOVER</p>
+      <h1>Remove a background without uploading the image</h1>
+      <p class="intro">The AI model runs in your browser. Your photo stays on your device.</p>
+      <label class="primary-button upload-button">
+        <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        Choose image
+      </label>
+      <div id="dropZone" class="drop-zone" tabindex="0">or drop an image here</div>
+      <p class="first-run">The first run downloads and caches the portrait-matting model.</p>
+    </section>
+
+    <section id="workspaceView" class="workspace hidden">
+      <div class="workspace-bar">
+        <button id="newImageButton" class="plain-button" type="button">＋ New image</button>
+        <div class="progress-area">
+          <span id="statusText">Image ready</span>
+          <progress id="modelProgress" class="hidden" max="100" value="0"></progress>
+        </div>
+        <div class="workspace-actions">
+          <button id="compareButton" class="plain-button" type="button" disabled>Hold to compare</button>
+          <button id="downloadButton" class="download-button" type="button" disabled>Download</button>
+        </div>
+      </div>
+
+      <div class="editor-shell">
+        <section class="canvas-section">
+          <div id="canvasViewport" class="canvas-viewport checkerboard">
+            <canvas id="resultCanvas"></canvas>
+            <div id="brushCursor" class="brush-cursor hidden"></div>
+            <div id="processingCover" class="processing-cover hidden">
+              <div class="spinner"></div>
+              <strong id="processingText">Removing background…</strong>
+              <span>This happens only on your device.</span>
+            </div>
+          </div>
+
+          <div class="primary-actions">
+            <button id="removeButton" class="primary-button" type="button">Remove background</button>
+            <button id="undoButton" class="secondary-button" type="button" disabled>Undo</button>
+            <button id="redoButton" class="secondary-button" type="button" disabled>Redo</button>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel-card">
+            <div class="panel-heading">
+              <div>
+                <small>BACKGROUND</small>
+                <h2>Choose a background</h2>
+              </div>
+            </div>
+            <div class="background-grid">
+              <button class="background-choice active" data-background="transparent" type="button">
+                <span class="swatch transparent"></span><strong>Transparent</strong>
+              </button>
+              <button class="background-choice" data-background="white" type="button">
+                <span class="swatch white"></span><strong>White</strong>
+              </button>
+              <button class="background-choice" data-background="black" type="button">
+                <span class="swatch black"></span><strong>Black</strong>
+              </button>
+              <button class="background-choice" data-background="colour" type="button">
+                <span class="swatch rainbow"></span><strong>Colour</strong>
+              </button>
+              <button class="background-choice" data-background="image" type="button">
+                <span class="swatch image">▧</span><strong>Image</strong>
+              </button>
+              <button class="background-choice" data-background="blur" type="button">
+                <span class="swatch image">◌</span><strong>Blur</strong>
+              </button>
+            </div>
+
+            <label id="colourField" class="field hidden">
+              Background colour
+              <input id="backgroundColour" type="color" value="#f0f2f5">
+            </label>
+            <label id="backgroundImageField" class="file-field hidden">
+              <input id="backgroundImageInput" type="file" accept="image/*" hidden>
+              Choose a background image
+            </label>
+            <label id="blurField" class="field hidden">
+              Blur
+              <input id="blurAmount" type="range" min="2" max="35" value="14">
+            </label>
+          </section>
+
+          <section class="panel-card">
+            <div class="panel-heading">
+              <div>
+                <small>REFINE</small>
+                <h2>Fix the edges</h2>
+              </div>
+            </div>
+            <div class="mode-buttons">
+              <button id="moveModeButton" class="mode-button active" data-mode="move" type="button">Move</button>
+              <button id="eraseModeButton" class="mode-button" data-mode="erase" type="button">Erase</button>
+              <button id="restoreModeButton" class="mode-button" data-mode="restore" type="button">Restore</button>
+            </div>
+            <label class="field">
+              Brush size
+              <input id="brushSize" type="range" min="8" max="140" value="45">
+            </label>
+            <label class="field">
+              Edge softness
+              <input id="edgeSoftness" type="range" min="0" max="14" value="2">
+            </label>
+            <label class="field">
+              Edge cleanup
+              <input id="edgeCleanup" type="range" min="-12" max="12" value="0">
+            </label>
+          </section>
+
+          <section class="panel-card compact">
+            <div class="panel-heading">
+              <div>
+                <small>SUBJECT</small>
+                <h2>Position and size</h2>
+              </div>
+              <button id="resetSubjectButton" class="text-button" type="button">Reset</button>
+            </div>
+            <label class="field">
+              Size
+              <input id="subjectScale" type="range" min="45" max="160" value="100">
+            </label>
+          </section>
+
+          <section class="privacy-card">
+            <strong>No image upload</strong>
+            <span>The photo and edit history exist only in this browser tab.</span>
+          </section>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="downloadDialog" class="download-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div><small>EXPORT</small><h2>Download image</h2></div>
+        <button value="cancel" aria-label="Close">×</button>
+      </div>
+      <label class="field">
+        Format
+        <select id="exportFormat">
+          <option value="png">PNG — supports transparency</option>
+          <option value="jpeg">JPG — smaller file</option>
+          <option value="webp">WEBP — modern format</option>
+        </select>
+      </label>
+      <label class="field">
+        Quality
+        <input id="exportQuality" type="range" min="60" max="100" value="94">
+      </label>
+      <div class="dialog-actions">
+        <button value="cancel" class="secondary-button">Cancel</button>
+        <button id="confirmDownloadButton" type="button" class="primary-button">Download</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="errorDialog" class="error-dialog">
+    <form method="dialog">
+      <h2>Could not complete the edit</h2>
+      <p id="errorMessage"></p>
+      <button class="primary-button">Close</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="./assets/js/background/app-v2.js?v=2"></script>
+</body>
+</html>
