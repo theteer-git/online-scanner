@@ -1,0 +1,19 @@
+ONLINE SCANNER — CLOUDFLARE PAGES DIRECT UPLOAD
+
+1. Sign in to Cloudflare.
+2. Open Workers & Pages.
+3. Select Create application.
+4. Choose Pages / Drag and drop your files.
+5. Use a hard-to-guess project name, for example:
+   scanner-lab-7x4m2q
+6. Upload THIS ZIP file, or upload the extracted folder.
+7. Select Deploy site.
+8. Open the generated:
+   https://<project-name>.pages.dev
+9. Test from both desktop and mobile.
+10. Share the URL only with intended testers.
+
+This is link-only preview access, not authentication.
+Anyone with the exact URL can use the scanner.
+
+Documents are processed locally in the browser and are not uploaded by this app.

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f7f9fc">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <meta name="description" content="A private online document scanner that processes files locally in your browser.">
+  <title>Private Online Scanner</title>
+  <link rel="stylesheet" href="./assets/css/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Online Scanner home">
+        <span class="brand-icon">▣</span>
+        <span>OnlineScanner<span class="brand-dot">.app</span></span>
+      </a>
+
+      <nav class="top-actions" aria-label="Document actions">
+        <button id="newDocumentButton" class="top-action" type="button">
+          <span class="top-action-icon">▤</span><span>New Document</span>
+        </button>
+        <button class="top-action" type="button" disabled title="Coming later">
+          <span class="top-action-icon">◎</span><span>English</span>
+        </button>
+        <button class="top-action" type="button" disabled title="Coming later">
+          <span class="top-action-icon">⌯</span><span>Share</span>
+        </button>
+        <button class="top-action" type="button" disabled title="Coming later">
+          <span class="top-action-icon">▧</span><span>OCR</span>
+        </button>
+      </nav>
+
+      <div class="privacy-state">
+        <span class="privacy-dot"></span>
+        <span>Local processing</span>
+      </div>
+    </header>
+
+    <section class="tool-strip" aria-label="Scanner toolbar">
+      <button id="backButton" class="tool-button" type="button">
+        <span class="tool-icon">←</span><span>Back</span>
+      </button>
+      <button id="undoButton" class="tool-button" type="button" disabled>
+        <span class="tool-icon">↶</span><span>Undo</span>
+      </button>
+      <button id="rotateButton" class="tool-button" type="button">
+        <span class="tool-icon">↻</span><span>Rotate</span>
+      </button>
+      <button id="adjustButton" class="tool-button" type="button">
+        <span class="tool-icon">✦</span><span>Effects</span>
+      </button>
+      <button id="zoomOutButton" class="tool-button" type="button">
+        <span class="tool-icon">−</span><span>Zoom</span>
+      </button>
+      <button id="fitButton" class="tool-button" type="button">
+        <span class="tool-icon">⛶</span><span>Fit</span>
+      </button>
+      <button id="cropButton" class="tool-button active" type="button">
+        <span class="tool-icon">⌗</span><span>Crop</span>
+      </button>
+      <button id="applyCropButton" class="tool-button commit-action" type="button">
+        <span class="tool-icon">✓</span><span>Apply</span>
+      </button>
+      <button id="downloadButton" class="tool-button accent" type="button">
+        <span class="tool-icon">⇩</span><span>Download</span>
+      </button>
+    </section>
+
+    <main class="workspace">
+      <section id="emptyState" class="empty-state">
+        <div class="empty-icon">▧</div>
+        <p class="eyebrow">PRIVATE ONLINE SCANNER</p>
+        <h1>Scan documents without uploading them</h1>
+        <p>Take a photo or add one from your device. Everything is processed locally in your browser.</p>
+        <div class="empty-actions">
+          <label class="primary-button">
+            <input id="fileInput" type="file" accept="image/*" multiple hidden>
+            Add images
+          </label>
+          <label class="secondary-button">
+            <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
+            Use camera
+          </label>
+        </div>
+        <div id="dropZone" class="drop-zone" tabindex="0">Drop images here</div>
+      </section>
+
+      <section id="editorStage" class="editor-stage hidden">
+        <div class="stage-viewport" id="stageViewport">
+          <canvas id="editorCanvas"></canvas>
+          <div class="zoom-indicator" id="zoomIndicator">100%</div>
+
+          <div id="nextActions" class="next-actions hidden" aria-label="Choose next action">
+            <button id="nextCropButton" type="button">
+              <span>⌗</span>
+              <strong>Crop</strong>
+            </button>
+            <button id="nextEffectsButton" type="button">
+              <span>✦</span>
+              <strong>Effects</strong>
+            </button>
+            <button id="nextRotateButton" type="button">
+              <span>↻</span>
+              <strong>Rotate</strong>
+            </button>
+            <button id="nextDownloadButton" class="primary" type="button">
+              <span>⇩</span>
+              <strong>Download</strong>
+            </button>
+          </div>
+        </div>
+
+        <aside id="adjustPanel" class="adjust-panel hidden">
+          <div class="panel-head">
+            <div>
+              <small>DOCUMENT EFFECTS</small>
+              <h2>Effects</h2>
+            </div>
+            <button id="closeAdjustButton" type="button" aria-label="Close adjustments">×</button>
+          </div>
+
+          <div class="effects-grid" id="effectsGrid" role="group" aria-label="Document effects">
+            <button class="effect-option active" type="button" data-effect="original">
+              <span class="effect-preview effect-original"></span>
+              <strong>Original</strong>
+            </button>
+            <button class="effect-option" type="button" data-effect="better">
+              <span class="effect-preview effect-better"></span>
+              <strong>Better</strong>
+            </button>
+            <button class="effect-option" type="button" data-effect="super">
+              <span class="effect-preview effect-super"></span>
+              <strong>Super</strong>
+            </button>
+            <button class="effect-option" type="button" data-effect="simple">
+              <span class="effect-preview effect-simple"></span>
+              <strong>Simple</strong>
+            </button>
+            <button class="effect-option" type="button" data-effect="bw">
+              <span class="effect-preview effect-bw"></span>
+              <strong>B &amp; W</strong>
+            </button>
+          </div>
+
+          <label>
+            Brightness
+            <input id="brightnessRange" type="range" min="-50" max="50" value="0">
+          </label>
+
+          <label>
+            Contrast
+            <input id="contrastRange" type="range" min="-50" max="80" value="0">
+          </label>
+
+          <label>
+            Sharpness
+            <input id="sharpnessRange" type="range" min="0" max="3" step=".1" value="0">
+          </label>
+
+          <div class="panel-action-grid">
+            <button id="resetAdjustButton" class="panel-button" type="button">Reset</button>
+            <button id="applyAdjustButton" class="panel-button panel-button-primary" type="button">Apply effect</button>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <section id="pageRail" class="page-rail hidden">
+      <button id="railToggle" class="rail-toggle" type="button" aria-label="Toggle page thumbnails">⌃</button>
+      <div class="rail-inner">
+        <button id="addPageButton" class="add-page-button" type="button">
+          <span>＋</span>
+          <small>Add page</small>
+        </button>
+        <div id="thumbnailList" class="thumbnail-list"></div>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="exportDialog" class="export-dialog">
+    <form method="dialog">
+      <div class="dialog-head">
+        <div>
+          <small>EXPORT</small>
+          <h2>Download scan</h2>
+        </div>
+        <button value="cancel" aria-label="Close">×</button>
+      </div>
+
+      <label>
+        File type
+        <select id="exportType">
+          <option value="jpeg">JPG</option>
+          <option value="png">PNG</option>
+        </select>
+      </label>
+
+      <label>
+        Quality
+        <input id="exportQuality" type="range" min="60" max="100" value="92">
+      </label>
+
+      <div class="dialog-actions">
+        <button value="cancel" class="secondary-button" type="submit">Cancel</button>
+        <button id="confirmExportButton" class="primary-button" type="button">Download</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./assets/js/app.js?v=professional-engine-v1"></script>
+</body>
+</html>
