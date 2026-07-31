@@ -1,0 +1,9 @@
+Replace the complete contents of D:\cam with this package, but keep the hidden .git folder.
+
+Then run:
+
+git add .
+git commit -m "Add private background remover"
+git push
+
+Test: https://online-scanner.pages.dev/background-remover.html

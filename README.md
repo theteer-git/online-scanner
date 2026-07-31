@@ -108,3 +108,7 @@ Profiles:
 - **B & W** — adaptive local thresholding, denoise, illumination correction and midtone preservation.
 
 All processing remains local in browser memory.
+
+
+## Background Remover V1
+Open `/background-remover.html`. Browser-side AI removal, transparent PNG, colour/image/blur replacement, and no image upload endpoint.
