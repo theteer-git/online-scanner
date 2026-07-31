@@ -1,0 +1,27 @@
+BACKGROUND REMOVER V2.1.1 ROUTE FIX
+
+Cause:
+The previous _redirects file rewrote /background-remover.html back to itself,
+creating an infinite redirect loop.
+
+Deploy:
+1. Copy all files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Run:
+
+cd /d D:\cam
+git add .
+git commit -m "Fix background remover redirect loop"
+git push
+
+After Cloudflare deployment completes:
+
+node verify-background-remover.mjs
+
+Expected:
+PASS https://online-scanner.pages.dev/background-remover.html?v=2.1.1 200
+PASS https://online-scanner.pages.dev/assets/js/background/app-v2.js?v=2.1.1 200
+Background Remover V2.1 route and deployment verified.
+
+Open:
+https://online-scanner.pages.dev/background-remover.html?v=2.1.1
