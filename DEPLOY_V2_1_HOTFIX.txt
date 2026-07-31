@@ -1,0 +1,42 @@
+BACKGROUND REMOVER V2.1 HOTFIX
+
+This fixes:
+- Old V1 interface still being served
+- WebAssembly blocked by Content Security Policy
+- WebGPU backend failure
+- Stale browser / Cloudflare HTML caching
+
+DEPLOYMENT
+
+1. Extract this ZIP.
+2. Copy every extracted file into D:\cam and replace existing files.
+3. Keep D:\cam\.git unchanged.
+
+Then run:
+
+cd /d D:\cam
+git add .
+git commit -m "Fix background remover WASM backend and stale V1 route"
+git push
+
+Wait until the Cloudflare Pages deployment is complete.
+
+VERIFY FROM COMMAND PROMPT:
+
+node verify-background-remover.mjs
+
+Expected:
+PASS .../background-remover.html?v=2.1.0
+PASS .../assets/js/background/app-v2.js?v=2.1.0
+Background Remover V2.1 deployment verified.
+
+OPEN IN CHROME:
+
+https://online-scanner.pages.dev/background-remover.html?v=2.1.0
+
+Press Ctrl+Shift+R once.
+
+The page must visibly show:
+Build V2.1
+
+If Build V2.1 is not visible, Cloudflare is still serving an old deployment.

@@ -1,4 +1,5 @@
 const $=selector=>document.querySelector(selector);
+console.info("Background Remover V2.1 compatibility build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -64,8 +65,8 @@ async function ensureModel(){
   const {pipeline,env}=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1");
   env.allowLocalModels=false;env.useBrowserCache=true;
   const options={
-    device:navigator.gpu?"webgpu":"wasm",
-    dtype:navigator.gpu?"fp16":"q8",
+    device:"wasm",
+    dtype:"q8",
     progress_callback:event=>{
       if(event?.progress!=null){
         const progress=Math.max(2,Math.min(98,Math.round(event.progress)));
@@ -74,14 +75,11 @@ async function ensureModel(){
       }
     }
   };
-  try{
-    state.segmenter=await pipeline("background-removal","Xenova/modnet",options);
-  }catch(error){
-    if(options.device==="webgpu"){
-      setStatus("WebGPU unavailable; loading compatible mode…");
-      state.segmenter=await pipeline("background-removal","Xenova/modnet",{...options,device:"wasm",dtype:"q8"});
-    }else throw error;
-  }
+  state.segmenter=await pipeline(
+    "background-removal",
+    "Xenova/modnet",
+    options
+  );
   els.progress.value=100;setTimeout(()=>els.progress.classList.add("hidden"),500);
   return state.segmenter;
 }
