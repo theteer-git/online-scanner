@@ -3,8 +3,8 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(self), microphone=(), geolocation=()
   X-Robots-Tag: noindex, nofollow, noarchive, nosnippet
-  Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://cdn-lfs.huggingface.co https://*.hf.co https://*.huggingface.co; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' blob: https://cdn.jsdelivr.net https://huggingface.co https://cdn-lfs.huggingface.co https://*.hf.co https://*.huggingface.co; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
 
 /background-remover
   Cache-Control: no-store, no-cache, must-revalidate
-  X-Background-Remover-Build: v3
+  X-Background-Remover-Build: v3.1

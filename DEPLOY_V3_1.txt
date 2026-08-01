@@ -1,0 +1,27 @@
+BACKGROUND REMOVER V3.1 — BLOB CSP HOTFIX
+
+Cause:
+Transformers.js reads the selected local image through a blob: URL.
+The previous Content Security Policy did not allow blob: in connect-src.
+
+Fix:
+connect-src now includes blob:.
+
+Deploy:
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Allow local blob image processing in CSP"
+git push
+
+After Cloudflare deployment:
+node verify-background-remover.mjs
+
+Open:
+https://online-scanner.pages.dev/background-remover?v=3.1.0
+
+The header must show:
+Processed locally · V3.1

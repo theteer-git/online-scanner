@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V3 direct MODNet build loaded");
+console.info("Background Remover V3.1 blob-CSP hotfix loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),

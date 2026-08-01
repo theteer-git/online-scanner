@@ -1,8 +1,8 @@
 const base=process.argv[2]||"https://online-scanner.pages.dev";
 const checks=[
-  [`${base}/background-remover?v=3.0.0`,["Processed locally · V3","app-v2.js?v=3.0.0"]],
-  [`${base}/assets/js/background/app-v2.js?v=3.0.0`,[
-    "Background Remover V3 direct MODNet build loaded",
+  [`${base}/background-remover?v=3.1.0`,["Processed locally · V3.1","app-v2.js?v=3.1.0"]],
+  [`${base}/assets/js/background/app-v2.js?v=3.1.0`,[
+    "Background Remover V3.1 blob-CSP hotfix loaded",
     "AutoModel.from_pretrained",
     "RawImage.fromTensor",
     "MODNet alpha diagnostics"
