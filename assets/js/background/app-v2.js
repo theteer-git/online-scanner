@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V3.1 blob-CSP hotfix loaded");
+console.info("Background Remover V4 smart-subject build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -13,7 +13,7 @@ const els={
 
 const ctx=els.canvas.getContext("2d");
 const state={
-  sourceFile:null,sourceBitmap:null,mask:null,model:null,processor:null,RawImage:null,bgBitmap:null,
+  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,bgBitmap:null,
   background:"transparent",mode:"move",subjectX:0,subjectY:0,subjectScale:1,
   dragging:false,lastPointer:null,painting:false,history:[],future:[],busy:false,showOriginal:false
 };
@@ -179,6 +179,189 @@ async function buildAlphaMask(sourceUrl){
   return mask;
 }
 
+
+function median(values){
+  if(!values.length)return 0;
+  values.sort((a,b)=>a-b);
+  return values[Math.floor(values.length/2)];
+}
+
+function createSmartSubjectMask(personMask){
+  if(!state.sourceBitmap||!personMask)return personMask;
+
+  const sourceWidth=state.sourceBitmap.width;
+  const sourceHeight=state.sourceBitmap.height;
+  const maxSide=480;
+  const scale=Math.min(1,maxSide/Math.max(sourceWidth,sourceHeight));
+  const width=Math.max(1,Math.round(sourceWidth*scale));
+  const height=Math.max(1,Math.round(sourceHeight*scale));
+
+  const imageCanvas=document.createElement("canvas");
+  imageCanvas.width=width;
+  imageCanvas.height=height;
+  const imageCtx=imageCanvas.getContext("2d",{willReadFrequently:true});
+  imageCtx.drawImage(state.sourceBitmap,0,0,width,height);
+  const pixels=imageCtx.getImageData(0,0,width,height).data;
+
+  const maskCanvas=document.createElement("canvas");
+  maskCanvas.width=sourceWidth;
+  maskCanvas.height=sourceHeight;
+  const maskCtx=maskCanvas.getContext("2d");
+  const maskImage=maskCtx.createImageData(sourceWidth,sourceHeight);
+  for(let i=0,p=3;i<personMask.length;i++,p+=4){
+    maskImage.data[p]=personMask[i];
+  }
+  maskCtx.putImageData(maskImage,0,0);
+
+  const smallMaskCanvas=document.createElement("canvas");
+  smallMaskCanvas.width=width;
+  smallMaskCanvas.height=height;
+  const smallMaskCtx=smallMaskCanvas.getContext("2d",{willReadFrequently:true});
+  smallMaskCtx.imageSmoothingEnabled=true;
+  smallMaskCtx.drawImage(maskCanvas,0,0,width,height);
+  const smallMaskRGBA=smallMaskCtx.getImageData(0,0,width,height).data;
+  const smallPerson=new Uint8ClampedArray(width*height);
+  for(let i=0,p=3;i<smallPerson.length;i++,p+=4)smallPerson[i]=smallMaskRGBA[p];
+
+  // Estimate the dominant background colour from the image border.
+  const borderR=[],borderG=[],borderB=[];
+  const borderStep=Math.max(1,Math.floor(Math.min(width,height)/80));
+  const addBorder=(x,y)=>{
+    const p=(y*width+x)*4;
+    borderR.push(pixels[p]);borderG.push(pixels[p+1]);borderB.push(pixels[p+2]);
+  };
+  for(let x=0;x<width;x+=borderStep){addBorder(x,0);addBorder(x,height-1)}
+  for(let y=0;y<height;y+=borderStep){addBorder(0,y);addBorder(width-1,y)}
+  const bgR=median(borderR),bgG=median(borderG),bgB=median(borderB);
+
+  // Person bounding box.
+  let minX=width,minY=height,maxX=0,maxY=0,seedCount=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const i=y*width+x;
+    if(smallPerson[i]>150){
+      if(x<minX)minX=x;if(x>maxX)maxX=x;
+      if(y<minY)minY=y;if(y>maxY)maxY=y;
+      seedCount++;
+    }
+  }
+  if(!seedCount)return personMask;
+
+  const boxW=Math.max(1,maxX-minX+1),boxH=Math.max(1,maxY-minY+1);
+  const marginX=Math.round(boxW*.35);
+  const marginTop=Math.round(boxH*.14);
+  const marginBottom=Math.round(boxH*.38);
+  minX=Math.max(0,minX-marginX);
+  maxX=Math.min(width-1,maxX+marginX);
+  minY=Math.max(0,minY-marginTop);
+  maxY=Math.min(height-1,maxY+marginBottom);
+
+  const candidate=new Uint8Array(width*height);
+  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
+    const i=y*width+x,p=i*4;
+    const dr=pixels[p]-bgR,dg=pixels[p+1]-bgG,db=pixels[p+2]-bgB;
+    const backgroundDistance=Math.sqrt(dr*dr+dg*dg+db*db);
+
+    const maxChannel=Math.max(pixels[p],pixels[p+1],pixels[p+2]);
+    const minChannel=Math.min(pixels[p],pixels[p+1],pixels[p+2]);
+    const chroma=maxChannel-minChannel;
+
+    // Strong MODNet pixels always remain candidates.
+    // Other pixels must be visually different from the border background.
+    if(smallPerson[i]>18 || backgroundDistance>52 || chroma>58){
+      candidate[i]=1;
+    }
+  }
+
+  // Flood-fill only candidate pixels connected to the person.
+  const kept=new Uint8Array(width*height);
+  const queue=new Int32Array(width*height);
+  let head=0,tail=0;
+
+  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
+    const i=y*width+x;
+    if(smallPerson[i]>145){
+      kept[i]=1;
+      queue[tail++]=i;
+    }
+  }
+
+  const neighbours=[-1,1,-width,width];
+  while(head<tail){
+    const current=queue[head++];
+    const x=current%width;
+    for(const delta of neighbours){
+      const next=current+delta;
+      if(next<0||next>=kept.length||kept[next]||!candidate[next])continue;
+      const nx=next%width;
+      if(Math.abs(nx-x)>1)continue;
+      const ny=Math.floor(next/width);
+      if(nx<minX||nx>maxX||ny<minY||ny>maxY)continue;
+
+      // Prevent very distant expansion into the upper background.
+      const nearPerson=smallPerson[next]>5;
+      const lowerSupport=ny>minY+boxH*.32;
+      if(!nearPerson&&!lowerSupport)continue;
+
+      kept[next]=1;
+      queue[tail++]=next;
+    }
+  }
+
+  // Remove tiny isolated growth and retain a softly expanded connected mask.
+  const supportCanvas=document.createElement("canvas");
+  supportCanvas.width=width;
+  supportCanvas.height=height;
+  const supportCtx=supportCanvas.getContext("2d");
+  const supportImage=supportCtx.createImageData(width,height);
+  for(let i=0,p=3;i<kept.length;i++,p+=4){
+    supportImage.data[p]=kept[i]?255:0;
+  }
+  supportCtx.putImageData(supportImage,0,0);
+
+  const fullCanvas=document.createElement("canvas");
+  fullCanvas.width=sourceWidth;
+  fullCanvas.height=sourceHeight;
+  const fullCtx=fullCanvas.getContext("2d",{willReadFrequently:true});
+  fullCtx.imageSmoothingEnabled=true;
+  fullCtx.drawImage(supportCanvas,0,0,sourceWidth,sourceHeight);
+  const fullData=fullCtx.getImageData(0,0,sourceWidth,sourceHeight).data;
+
+  const smart=new Uint8ClampedArray(personMask.length);
+  let added=0;
+  for(let i=0,p=3;i<smart.length;i++,p+=4){
+    const supportAlpha=fullData[p];
+    // Preserve the fine MODNet edge while adding connected support objects.
+    smart[i]=Math.max(personMask[i],supportAlpha>120?255:supportAlpha);
+    if(smart[i]>personMask[i]+20)added++;
+  }
+
+  console.info("Smart subject diagnostics",{
+    addedPixels:added,
+    addedRatio:added/smart.length,
+    backgroundSample:[bgR,bgG,bgB],
+    workingSize:[width,height]
+  });
+
+  return smart;
+}
+
+function applySubjectMode(mode){
+  state.subjectMode=mode;
+  state.mask=mode==="person"
+    ? cloneMask(state.personMask)
+    : cloneMask(state.smartMask||state.personMask);
+
+  document.querySelectorAll("[data-subject-mode]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.subjectMode===mode);
+  });
+
+  state.history=[];
+  state.future=[];
+  updateHistoryButtons();
+  render();
+  setStatus(mode==="smart"?"Smart subject selected":"Person only selected");
+}
+
 async function removeBackground(){
   if(!state.sourceFile){
     setStatus("Choose an image first");
@@ -197,7 +380,12 @@ async function removeBackground(){
     setBusy(true,"Preparing local AI…");
     const url=URL.createObjectURL(state.sourceFile);
     try{
-      state.mask=await buildAlphaMask(url);
+      state.personMask=await buildAlphaMask(url);
+      setStatus("Preserving connected support objects…");
+      state.smartMask=createSmartSubjectMask(state.personMask);
+      state.mask=state.subjectMode==="smart"
+        ? cloneMask(state.smartMask)
+        : cloneMask(state.personMask);
     }finally{
       URL.revokeObjectURL(url);
     }
@@ -336,7 +524,7 @@ function resetSubject(){
 }
 function resetApp(){
   state.sourceBitmap?.close?.();state.bgBitmap?.close?.();
-  Object.assign(state,{sourceFile:null,sourceBitmap:null,rawCutout:null,mask:null,bgBitmap:null,history:[],future:[],subjectX:0,subjectY:0,subjectScale:1});
+  Object.assign(state,{sourceFile:null,sourceBitmap:null,rawCutout:null,mask:null,personMask:null,smartMask:null,bgBitmap:null,history:[],future:[],subjectX:0,subjectY:0,subjectScale:1});
   els.input.value="";els.workspace.classList.add("hidden");els.welcome.classList.remove("hidden");
 }
 function download(){
@@ -382,7 +570,11 @@ document.querySelectorAll(".background-choice").forEach(button=>button.addEventL
 }));
 els.bgInput.addEventListener("change",event=>loadBackground(event.target.files[0]).catch(showError));
 [els.bgColour,els.blur,els.softness,els.cleanup].forEach(input=>input.addEventListener("input",render));
-document.querySelectorAll(".mode-button").forEach(button=>button.addEventListener("click",()=>setMode(button.dataset.mode)));
+document.querySelectorAll(".mode-button[data-mode]").forEach(button=>button.addEventListener("click",()=>setMode(button.dataset.mode)));
+document.querySelectorAll("[data-subject-mode]").forEach(button=>button.addEventListener("click",()=>{
+  if(!state.personMask)return;
+  applySubjectMode(button.dataset.subjectMode);
+}));
 els.scale.addEventListener("input",()=>{state.subjectScale=Number(els.scale.value)/100;render()});
 $("#resetSubjectButton").addEventListener("click",resetSubject);
 els.compare.addEventListener("pointerdown",()=>{state.showOriginal=true;render()});

@@ -1,11 +1,15 @@
 const base=process.argv[2]||"https://online-scanner.pages.dev";
 const checks=[
-  [`${base}/background-remover?v=3.1.0`,["Processed locally · V3.1","app-v2.js?v=3.1.0"]],
-  [`${base}/assets/js/background/app-v2.js?v=3.1.0`,[
-    "Background Remover V3.1 blob-CSP hotfix loaded",
-    "AutoModel.from_pretrained",
-    "RawImage.fromTensor",
-    "MODNet alpha diagnostics"
+  [`${base}/background-remover?v=4.0.0`,[
+    "Processed locally · V4",
+    "app-v2.js?v=4.0.0",
+    "Smart subject"
+  ]],
+  [`${base}/assets/js/background/app-v2.js?v=4.0.0`,[
+    "Background Remover V4 smart-subject build loaded",
+    "createSmartSubjectMask",
+    "Smart subject diagnostics",
+    "data-subject-mode"
   ]]
 ];
 let failed=0;
@@ -19,4 +23,4 @@ for(const [url,expected] of checks){
   }else console.log("PASS",url,response.status);
 }
 if(failed)process.exitCode=1;
-else console.log("Background Remover V3 deployment verified.");
+else console.log("Background Remover V4 deployment verified.");

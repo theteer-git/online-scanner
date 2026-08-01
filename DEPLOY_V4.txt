@@ -1,0 +1,35 @@
+BACKGROUND REMOVER V4 — SMART SUBJECT EXTRACTION
+
+V4 provides two instant extraction modes:
+
+1. Person only
+   Uses the original fine MODNet person mask.
+
+2. Smart subject
+   Keeps the person plus connected supporting foreground objects,
+   such as chairs and wheelchairs, while rejecting detached objects.
+
+Deployment:
+
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Add smart subject extraction for connected support objects"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=4.0.0
+
+The header must show:
+
+Processed locally · V4
