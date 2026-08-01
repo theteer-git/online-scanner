@@ -1,18 +1,18 @@
 const base=process.argv[2]||"https://online-scanner.pages.dev";
 
 const checks=[
-  [`${base}/background-remover?v=10.1.0`,[
-    "Processed locally · V10.1",
-    "app-v2.js?v=10.1.0",
-    "Person-only extraction"
+  [`${base}/background-remover?v=10.2.0`,[
+    "Processed locally · V10.2",
+    "app-v2.js?v=10.2.0",
+    "targeted chair recovery"
   ]],
-  [`${base}/assets/js/background/app-v2.js?v=10.1.0`,[
-    "Background Remover V10.1 refinement build loaded",
-    "warmupPrimaryModel",
-    "keepLargestPersonComponent",
-    "V10.1 person-only cleanup diagnostics",
-    "support:\"skipped\"",
-    "V10.1 MVANet alpha diagnostics"
+  [`${base}/assets/js/background/app-v2.js?v=10.2.0`,[
+    "Background Remover V10.2 geometry refinement build loaded",
+    "refineV102PersonMask",
+    "refineV102SupportMask",
+    "V10.2 chair bridge diagnostics",
+    "V10.2 floor residue diagnostics",
+    "V10.2 support geometry diagnostics"
   ]]
 ];
 
@@ -37,4 +37,4 @@ for(const [url,expected] of checks){
 }
 
 if(failed)process.exitCode=1;
-else console.log("Background Remover V10.1 deployment verified.");
+else console.log("Background Remover V10.2 deployment verified.");

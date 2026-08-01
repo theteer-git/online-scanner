@@ -1,0 +1,38 @@
+BACKGROUND REMOVER V10.2 — TARGETED GEOMETRY REFINEMENT
+
+V10.2 preserves the working V10.1 model architecture.
+
+Changes:
+- repairs short vertical gaps in chair legs and backrest areas;
+- removes faint floor residue below the subject;
+- protects person edges around the shoulders, arms, hands and clothing;
+- smooths jagged chair/support edges without broadly blurring the person;
+- applies the refinements to both initial extraction and later mode switching;
+- keeps Person only as the fast default;
+- keeps model warmup, cache reuse and local-only processing unchanged.
+
+DEPLOY
+
+1. Extract this ZIP.
+2. Copy all files into D:\cam and replace existing files.
+3. Keep D:\cam\.git unchanged.
+4. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Refine chair geometry and remove floor residue"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=10.2.0
+
+Required marker:
+
+Processed locally · V10.2

@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V10.1 refinement build loaded");
+console.info("Background Remover V10.2 geometry refinement build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -301,7 +301,7 @@ async function buildMVANetMask(sourceUrl){
     if(alpha>8)foreground++;
   }
 
-  console.info("V10.1 MVANet alpha diagnostics",{
+  console.info("V10.2 MVANet alpha diagnostics",{
     backend:state.professionalBackend,
     sourceSize:[result.width,result.height],
     outputSize:[state.sourceBitmap.width,state.sourceBitmap.height],
@@ -957,6 +957,240 @@ function refineProfessionalMatte(finePersonMask,combinedMask,panopticPersonMask,
 }
 
 
+
+function maskBox(mask,width,height,threshold=40){
+  let minX=width,minY=height,maxX=-1,maxY=-1,count=0;
+
+  for(let y=0;y<height;y++){
+    const row=y*width;
+    for(let x=0;x<width;x++){
+      if(mask[row+x]<threshold)continue;
+      if(x<minX)minX=x;
+      if(x>maxX)maxX=x;
+      if(y<minY)minY=y;
+      if(y>maxY)maxY=y;
+      count++;
+    }
+  }
+
+  return count?{minX,minY,maxX,maxY,count}:null;
+}
+
+function protectFinePersonEdges(mask,referenceMask,width,height){
+  const output=cloneMask(mask);
+  const box=maskBox(referenceMask,width,height,55);
+  if(!box)return output;
+
+  const horizontalPad=Math.max(2,Math.round((box.maxX-box.minX+1)*.035));
+  const verticalPad=Math.max(2,Math.round((box.maxY-box.minY+1)*.025));
+
+  for(let y=Math.max(0,box.minY-verticalPad);y<=Math.min(height-1,box.maxY+verticalPad);y++){
+    for(let x=Math.max(0,box.minX-horizontalPad);x<=Math.min(width-1,box.maxX+horizontalPad);x++){
+      const index=y*width+x;
+      output[index]=Math.max(output[index],referenceMask[index]);
+    }
+  }
+
+  return output;
+}
+
+function suppressFloorResidue(mask,referenceMask,width,height){
+  const output=cloneMask(mask);
+  const personBox=maskBox(referenceMask,width,height,55);
+  if(!personBox)return output;
+
+  const floorStart=Math.min(
+    height-1,
+    personBox.maxY+Math.max(2,Math.round(height*.008))
+  );
+  const strongKeepXPad=Math.max(4,Math.round((personBox.maxX-personBox.minX+1)*.12));
+  const keepMinX=Math.max(0,personBox.minX-strongKeepXPad);
+  const keepMaxX=Math.min(width-1,personBox.maxX+strongKeepXPad);
+
+  let removed=0;
+
+  for(let y=floorStart;y<height;y++){
+    const distance=(y-floorStart)/Math.max(1,height-floorStart);
+    const rowThreshold=24+Math.round(distance*42);
+
+    for(let x=0;x<width;x++){
+      const index=y*width+x;
+      if(output[index]===0)continue;
+
+      const insideSubjectColumn=x>=keepMinX&&x<=keepMaxX;
+      const protectedByReference=referenceMask[index]>18;
+
+      if(!insideSubjectColumn&&!protectedByReference){
+        if(output[index]<180){
+          output[index]=0;
+          removed++;
+        }
+        continue;
+      }
+
+      if(!protectedByReference&&output[index]<rowThreshold){
+        output[index]=0;
+        removed++;
+      }
+    }
+  }
+
+  console.info("V10.2 floor residue diagnostics",{
+    floorStart,
+    removedPixels:removed
+  });
+
+  return output;
+}
+
+function bridgeSupportColumns(mask,referenceMask,width,height){
+  const output=cloneMask(mask);
+  const personBox=maskBox(referenceMask,width,height,55);
+  if(!personBox)return output;
+
+  const lowerStart=Math.max(
+    0,
+    Math.round(personBox.minY+(personBox.maxY-personBox.minY)*.43)
+  );
+  const searchPad=Math.max(6,Math.round((personBox.maxX-personBox.minX+1)*.22));
+  const minX=Math.max(0,personBox.minX-searchPad);
+  const maxX=Math.min(width-1,personBox.maxX+searchPad);
+  const maxGap=Math.max(2,Math.min(14,Math.round(height*.012)));
+
+  let bridgedPixels=0;
+
+  // Repair short vertical gaps in chair legs/backrest near the person.
+  for(let x=minX;x<=maxX;x++){
+    let lastSolid=-1;
+
+    for(let y=lowerStart;y<=Math.min(height-1,personBox.maxY+Math.round(height*.035));y++){
+      const index=y*width+x;
+      const solid=output[index]>45;
+
+      if(solid){
+        if(lastSolid>=0){
+          const gap=y-lastSolid-1;
+
+          if(gap>0&&gap<=maxGap){
+            const upperIndex=lastSolid*width+x;
+            const lowerIndex=y*width+x;
+            const edgeStrength=Math.min(output[upperIndex],output[lowerIndex]);
+
+            if(edgeStrength>55){
+              for(let fillY=lastSolid+1;fillY<y;fillY++){
+                const fillIndex=fillY*width+x;
+                const neighbourReference=
+                  (x>0&&referenceMask[fillIndex-1]>8)||
+                  (x<width-1&&referenceMask[fillIndex+1]>8)||
+                  referenceMask[fillIndex]>8;
+
+                if(neighbourReference||edgeStrength>115){
+                  output[fillIndex]=Math.max(
+                    output[fillIndex],
+                    Math.round(edgeStrength*.74)
+                  );
+                  bridgedPixels++;
+                }
+              }
+            }
+          }
+        }
+
+        lastSolid=y;
+      }
+    }
+  }
+
+  console.info("V10.2 chair bridge diagnostics",{
+    maxGap,
+    bridgedPixels
+  });
+
+  return output;
+}
+
+function smoothSupportEdgeBand(mask,referenceMask,width,height){
+  const source=maskToAlphaCanvas(mask,width,height);
+  const softenedCanvas=document.createElement("canvas");
+  softenedCanvas.width=width;
+  softenedCanvas.height=height;
+  const softenedContext=softenedCanvas.getContext("2d",{willReadFrequently:true});
+  softenedContext.filter="blur(0.65px)";
+  softenedContext.drawImage(source,0,0);
+  softenedContext.filter="none";
+
+  const softened=alphaCanvasToMask(softenedCanvas);
+  const output=new Uint8ClampedArray(mask.length);
+  const personBox=maskBox(referenceMask,width,height,55);
+
+  for(let i=0;i<output.length;i++){
+    const original=mask[i];
+
+    if(referenceMask[i]>24){
+      // Preserve the original person edge more strongly.
+      output[i]=Math.max(original,referenceMask[i]);
+      continue;
+    }
+
+    if(!personBox){
+      output[i]=original;
+      continue;
+    }
+
+    const x=i%width;
+    const y=Math.floor(i/width);
+    const nearPerson=
+      x>=personBox.minX-Math.round(width*.025)&&
+      x<=personBox.maxX+Math.round(width*.025)&&
+      y>=personBox.minY&&
+      y<=personBox.maxY+Math.round(height*.035);
+
+    if(nearPerson&&original>0&&original<245){
+      output[i]=Math.round(original*.66+softened[i]*.34);
+    }else{
+      output[i]=original;
+    }
+  }
+
+  return output;
+}
+
+function refineV102PersonMask(mask,width,height){
+  let refined=keepLargestPersonComponent(mask,mask,width,height);
+  refined=suppressFloorResidue(refined,mask,width,height);
+  refined=protectFinePersonEdges(refined,mask,width,height);
+  refined=smoothSupportEdgeBand(refined,mask,width,height);
+
+  console.info("V10.2 person geometry diagnostics",{
+    width,
+    height
+  });
+
+  return refined;
+}
+
+function refineV102SupportMask(personMask,smartMask,width,height){
+  let refined=bridgeSupportColumns(smartMask,personMask,width,height);
+  refined=keepOnlyPersonAnchoredComponent(
+    refined,
+    personMask,
+    width,
+    height
+  );
+  refined=suppressFloorResidue(refined,personMask,width,height);
+  refined=protectFinePersonEdges(refined,personMask,width,height);
+  refined=fillSmallInternalHoles(refined,width,height);
+  refined=smoothSupportEdgeBand(refined,personMask,width,height);
+  refined=featherMatte(refined,width,height);
+
+  console.info("V10.2 support geometry diagnostics",{
+    width,
+    height
+  });
+
+  return refined;
+}
+
 function keepLargestPersonComponent(mask,personInstanceMask,width,height){
   const candidate=new Uint8Array(mask.length);
   const personSeed=new Uint8Array(personInstanceMask.length);
@@ -1136,7 +1370,7 @@ async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
     height
   );
 
-  console.info("V10.1 MVANet + panoptic diagnostics",{
+  console.info("V10.2 MVANet + panoptic diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -1165,8 +1399,17 @@ async function applySubjectMode(mode){
       const url=URL.createObjectURL(state.sourceFile);
       try{
         const result=await createPanopticSubjectMasks(state.personMask,url);
-        state.personMask=result.personMask;
-        state.smartMask=result.smartMask;
+        state.personMask=refineV102PersonMask(
+          result.personMask,
+          state.sourceBitmap.width,
+          state.sourceBitmap.height
+        );
+        state.smartMask=refineV102SupportMask(
+          state.personMask,
+          result.smartMask,
+          state.sourceBitmap.width,
+          state.sourceBitmap.height
+        );
         state.semanticLabels=result.keptSupports;
       }finally{
         URL.revokeObjectURL(url);
@@ -1218,20 +1461,28 @@ async function removeBackground(){
         setStatus("Selecting the real person and support instances…");
         const panoptic=await createPanopticSubjectMasks(primary.mask,url);
 
-        state.personMask=panoptic.personMask;
-        state.smartMask=panoptic.smartMask;
+        state.personMask=refineV102PersonMask(
+          panoptic.personMask,
+          state.sourceBitmap.width,
+          state.sourceBitmap.height
+        );
+        state.smartMask=refineV102SupportMask(
+          state.personMask,
+          panoptic.smartMask,
+          state.sourceBitmap.width,
+          state.sourceBitmap.height
+        );
         state.semanticLabels=panoptic.keptSupports;
         state.mask=cloneMask(state.smartMask);
 
-        console.info("V10.1 extraction backend",{
+        console.info("V10.2 extraction backend",{
           primary:primary.backend,
           support:"DETR Panoptic",
           cleanup:"person-anchored"
         });
       }else{
         setStatus("Cleaning the person matte…");
-        state.personMask=keepLargestPersonComponent(
-          primary.mask,
+        state.personMask=refineV102PersonMask(
           primary.mask,
           state.sourceBitmap.width,
           state.sourceBitmap.height
@@ -1240,7 +1491,7 @@ async function removeBackground(){
         state.semanticLabels=[];
         state.mask=cloneMask(state.personMask);
 
-        console.info("V10.1 extraction backend",{
+        console.info("V10.2 extraction backend",{
           primary:primary.backend,
           support:"skipped",
           cleanup:"largest-person-component"
