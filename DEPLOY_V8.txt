@@ -1,0 +1,19 @@
+BACKGROUND REMOVER V8 — PERSON-ANCHORED COMPONENT CLEANUP
+
+V8 uses the selected DETR panoptic person instance as the only cleanup seed. Detached MODNet false positives can no longer preserve themselves.
+
+DEPLOY
+1. Copy extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Ensure D:\cam\_redirects does not exist.
+
+cd /d D:\cam
+git add -A
+git commit -m "Anchor matte cleanup to the selected person instance"
+git push
+
+After deployment:
+node verify-background-remover.mjs
+
+Open:
+https://online-scanner.pages.dev/background-remover?v=8.0.0

@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V7 matte-refinement build loaded");
+console.info("Background Remover V8 person-anchored cleanup build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -655,36 +655,84 @@ function featherMatte(mask,width,height){
   return result;
 }
 
-function refineProfessionalMatte(personMask,combinedMask,width,height){
-  const repairRadius=Math.max(1,Math.min(4,Math.round(Math.max(width,height)*.0022)));
 
-  // Person detail is preserved separately. Morphological repair is applied to
-  // the combined support mask, then false disconnected components are removed.
-  const closed=morphologyClose(combinedMask,width,height,repairRadius);
-  for(let i=0;i<closed.length;i++){
-    closed[i]=Math.max(closed[i],personMask[i]);
+function dilateBinaryMask(mask,width,height,radius,threshold=55){
+  const output=new Uint8Array(mask.length);
+  for(let y=0;y<height;y++){
+    for(let x=0;x<width;x++){
+      let found=false;
+      for(let dy=-radius;dy<=radius&&!found;dy++){
+        const py=y+dy;if(py<0||py>=height)continue;
+        for(let dx=-radius;dx<=radius;dx++){
+          if(dx*dx+dy*dy>radius*radius)continue;
+          const px=x+dx;if(px<0||px>=width)continue;
+          if(mask[py*width+px]>threshold){found=true;break;}
+        }
+      }
+      if(found)output[y*width+x]=1;
+    }
   }
+  return output;
+}
 
-  const anchored=componentFilterAnchoredToPerson(
-    closed,
-    personMask,
-    width,
-    height
-  );
-
-  for(let i=0;i<anchored.length;i++){
-    anchored[i]=Math.max(anchored[i],personMask[i]);
+function keepOnlyPersonAnchoredComponent(combinedMask,panopticPersonMask,width,height){
+  const bridgeRadius=Math.max(2,Math.min(10,Math.round(Math.max(width,height)*.009)));
+  const personSeed=dilateBinaryMask(panopticPersonMask,width,height,bridgeRadius,55);
+  const bridged=morphologyClose(new Uint8ClampedArray(combinedMask),width,height,Math.max(1,Math.round(bridgeRadius*.45)));
+  const candidate=new Uint8Array(bridged.length);
+  for(let i=0;i<candidate.length;i++)candidate[i]=bridged[i]>18?1:0;
+  const kept=new Uint8Array(candidate.length),queue=new Int32Array(candidate.length);
+  let head=0,tail=0,seedPixels=0;
+  for(let i=0;i<candidate.length;i++)if(candidate[i]&&personSeed[i]){kept[i]=1;queue[tail++]=i;seedPixels++;}
+  if(!seedPixels)throw new Error('The selected person instance did not overlap the extracted matte.');
+  while(head<tail){
+    const current=queue[head++],x=current%width,y=Math.floor(current/width);
+    const neighbours=[[x-1,y],[x+1,y],[x,y-1],[x,y+1],[x-1,y-1],[x+1,y-1],[x-1,y+1],[x+1,y+1]];
+    for(const [nx,ny] of neighbours){
+      if(nx<0||nx>=width||ny<0||ny>=height)continue;
+      const next=ny*width+nx;if(!candidate[next]||kept[next])continue;
+      kept[next]=1;queue[tail++]=next;
+    }
   }
+  const output=new Uint8ClampedArray(combinedMask.length);
+  let keptPixels=0,removedPixels=0;
+  for(let i=0;i<output.length;i++){
+    if(kept[i]){output[i]=bridged[i];keptPixels++;}
+    else if(combinedMask[i]>18)removedPixels++;
+  }
+  console.info('V8 person-anchored component diagnostics',{bridgeRadius,seedPixels,keptPixels,removedPixels,removedRatio:removedPixels/output.length});
+  return output;
+}
 
-  const filled=fillSmallInternalHoles(anchored,width,height);
+function removeTinyEdgeIslands(mask,personInstanceMask,width,height){
+  const personBounds=maskBounds(personInstanceMask,width,height,55);if(!personBounds)return mask;
+  const binary=new Uint8Array(mask.length);for(let i=0;i<binary.length;i++)binary[i]=mask[i]>18?1:0;
+  const visited=new Uint8Array(binary.length),queue=new Int32Array(binary.length),result=new Uint8ClampedArray(mask.length);
+  const minimumArea=Math.max(18,Math.round(width*height*.000025));let removedComponents=0,removedPixels=0;
+  for(let start=0;start<binary.length;start++){
+    if(!binary[start]||visited[start])continue;
+    let head=0,tail=0;const component=[];let overlapsPersonBox=false;queue[tail++]=start;visited[start]=1;
+    while(head<tail){
+      const current=queue[head++];component.push(current);const x=current%width,y=Math.floor(current/width);
+      if(x>=personBounds.minX&&x<=personBounds.maxX&&y>=personBounds.minY&&y<=personBounds.maxY)overlapsPersonBox=true;
+      const neighbours=[x>0?current-1:-1,x<width-1?current+1:-1,y>0?current-width:-1,y<height-1?current+width:-1];
+      for(const next of neighbours){if(next<0||!binary[next]||visited[next])continue;visited[next]=1;queue[tail++]=next;}
+    }
+    const keep=component.length>=minimumArea||overlapsPersonBox;
+    if(keep)for(const index of component)result[index]=mask[index];
+    else{removedComponents++;removedPixels+=component.length;}
+  }
+  console.info('V8 tiny-island diagnostics',{removedComponents,removedPixels,minimumArea});return result;
+}
+
+function refineProfessionalMatte(finePersonMask,combinedMask,panopticPersonMask,width,height){
+  const anchored=keepOnlyPersonAnchoredComponent(combinedMask,panopticPersonMask,width,height);
+  const retainedGate=dilateBinaryMask(anchored,width,height,Math.max(1,Math.round(Math.max(width,height)*.003)),12);
+  for(let i=0;i<anchored.length;i++)if(retainedGate[i])anchored[i]=Math.max(anchored[i],finePersonMask[i]);
+  const noIslands=removeTinyEdgeIslands(anchored,panopticPersonMask,width,height);
+  const filled=fillSmallInternalHoles(noIslands,width,height);
   const feathered=featherMatte(filled,width,height);
-
-  console.info("V7 matte refinement diagnostics",{
-    repairRadius,
-    width,
-    height
-  });
-
+  console.info('V8 matte refinement diagnostics',{width,height,anchor:'panoptic-person-instance'});
   return feathered;
 }
 
@@ -769,24 +817,22 @@ async function createPanopticSubjectMasks(modnetMask,sourceUrl){
   const professionalSmart=refineProfessionalMatte(
     refinedPerson,
     smart,
+    selectedPerson.mask,
     width,
     height
   );
 
   // Person-only mode receives fragment cleanup and subtle feathering while
   // retaining MODNet's fine portrait detail.
-  const professionalPerson=featherMatte(
-    componentFilterAnchoredToPerson(
-      refinedPerson,
-      refinedPerson,
-      width,
-      height
-    ),
+  const professionalPerson=refineProfessionalMatte(
+    refinedPerson,
+    refinedPerson,
+    selectedPerson.mask,
     width,
     height
   );
 
-  console.info("V7 panoptic + matting diagnostics",{
+  console.info("V8 panoptic + person-anchored diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
