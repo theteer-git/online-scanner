@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V10.3 speed-first build loaded");
+console.info("Background Remover V10.4 quantized multithread build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -92,6 +92,23 @@ async function ensureTransformersRuntime(){
 
   env.allowLocalModels=false;
   env.useBrowserCache=true;
+  env.useWasmCache=true;
+
+  const availableCores=Math.max(1,navigator.hardwareConcurrency||2);
+  const preferredThreads=Math.max(1,Math.min(4,Math.floor(availableCores/2)));
+
+  if(env.backends?.onnx?.wasm){
+    env.backends.onnx.wasm.numThreads=self.crossOriginIsolated
+      ? preferredThreads
+      : 1;
+  }
+
+  console.info("V10.4 runtime diagnostics",{
+    crossOriginIsolated:self.crossOriginIsolated,
+    hardwareConcurrency:availableCores,
+    wasmThreads:self.crossOriginIsolated?preferredThreads:1,
+    cacheEnabled:env.useBrowserCache
+  });
 
   return {pipeline,RawImage,AutoModel,AutoProcessor};
 }
@@ -103,8 +120,8 @@ async function ensureModel(){
 
   els.progress.classList.remove("hidden");
   els.progress.removeAttribute("value");
-  setBusy(true,"Preparing portrait model…");
-  els.remove.textContent="Preparing model…";
+  setBusy(true,"Preparing 6.63 MB fast model…");
+  els.remove.textContent="Loading fast model…";
 
   const {AutoModel,AutoProcessor,RawImage}=await ensureTransformersRuntime();
 
@@ -112,7 +129,7 @@ async function ensureModel(){
     if(event?.progress!=null){
       const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
       els.progress.value=progress;
-      setStatus(`Downloading portrait model… ${progress}%`);
+      setStatus(`Downloading 6.63 MB fast model… ${progress}%`);
     }else if(event?.status){
       setStatus(`Model: ${event.status}`);
     }
@@ -120,23 +137,23 @@ async function ensureModel(){
 
   state.processor=await withTimeout(
     AutoProcessor.from_pretrained("Xenova/modnet",{progress_callback}),
-    180000,
+    90000,
     "Portrait processor download"
   );
 
   state.model=await withTimeout(
     AutoModel.from_pretrained("Xenova/modnet",{
-      dtype:"fp32",
+      dtype:"q8",
       device:"wasm",
       progress_callback
     }),
-    240000,
-    "Portrait model download"
+    120000,
+    "Quantized portrait model download"
   );
 
   state.RawImage=RawImage;
   els.progress.value=100;
-  setStatus("Model ready");
+  setStatus("Fast model ready");
   if(state.sourceFile)els.remove.textContent="Remove background";
   setTimeout(()=>els.progress.classList.add("hidden"),600);
 
@@ -276,7 +293,7 @@ async function buildMVANetMask(sourceUrl){
     if(alpha>8)foreground++;
   }
 
-  console.info("V10.3 MVANet alpha diagnostics",{
+  console.info("V10.4 MVANet alpha diagnostics",{
     backend:state.professionalBackend,
     sourceSize:[result.width,result.height],
     outputSize:[state.sourceBitmap.width,state.sourceBitmap.height],
@@ -300,8 +317,8 @@ async function buildFastMask(sourceUrl){
   setStatus("Running fast portrait extraction…");
   const mask=await buildAlphaMask(sourceUrl);
 
-  console.info("V10.3 fast extraction diagnostics",{
-    backend:"MODNet WASM",
+  console.info("V10.4 fast extraction diagnostics",{
+    backend:"MODNet q8 WASM",
     width:state.sourceBitmap.width,
     height:state.sourceBitmap.height
   });
@@ -314,7 +331,7 @@ async function buildProfessionalOrFallbackMask(sourceUrl){
     const mask=await buildFastMask(sourceUrl);
     return {
       mask,
-      backend:"MODNet fast"
+      backend:"MODNet q8 fast"
     };
   }
 
@@ -383,7 +400,7 @@ async function buildAlphaMask(sourceUrl){
     if(alpha>8)nonZero++;
   }
 
-  console.info("MODNet alpha diagnostics",{
+  console.info("V10.4 q8 MODNet alpha diagnostics",{
     width:state.sourceBitmap.width,
     height:state.sourceBitmap.height,
     minimum,
@@ -1032,7 +1049,7 @@ function suppressFloorResidue(mask,referenceMask,width,height){
     }
   }
 
-  console.info("V10.3 floor residue diagnostics",{
+  console.info("V10.4 floor residue diagnostics",{
     floorStart,
     removedPixels:removed
   });
@@ -1098,7 +1115,7 @@ function bridgeSupportColumns(mask,referenceMask,width,height){
     }
   }
 
-  console.info("V10.3 chair bridge diagnostics",{
+  console.info("V10.4 chair bridge diagnostics",{
     maxGap,
     bridgedPixels
   });
@@ -1158,7 +1175,7 @@ function refineV102PersonMask(mask,width,height){
   refined=protectFinePersonEdges(refined,mask,width,height);
   refined=smoothSupportEdgeBand(refined,mask,width,height);
 
-  console.info("V10.3 person geometry diagnostics",{
+  console.info("V10.4 person geometry diagnostics",{
     width,
     height
   });
@@ -1180,7 +1197,7 @@ function refineV102SupportMask(personMask,smartMask,width,height){
   refined=smoothSupportEdgeBand(refined,personMask,width,height);
   refined=featherMatte(refined,width,height);
 
-  console.info("V10.3 support geometry diagnostics",{
+  console.info("V10.4 support geometry diagnostics",{
     width,
     height
   });
@@ -1367,7 +1384,7 @@ async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
     height
   );
 
-  console.info("V10.3 MVANet + panoptic diagnostics",{
+  console.info("V10.4 MVANet + panoptic diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -1472,7 +1489,7 @@ async function removeBackground(){
         state.semanticLabels=panoptic.keptSupports;
         state.mask=cloneMask(state.smartMask);
 
-        console.info("V10.3 extraction backend",{
+        console.info("V10.4 extraction backend",{
           primary:primary.backend,
           support:"DETR Panoptic",
           cleanup:"person-anchored"
@@ -1488,7 +1505,7 @@ async function removeBackground(){
         state.semanticLabels=[];
         state.mask=cloneMask(state.personMask);
 
-        console.info("V10.3 extraction backend",{
+        console.info("V10.4 extraction backend",{
           primary:primary.backend,
           support:"skipped",
           cleanup:"largest-person-component"

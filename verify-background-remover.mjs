@@ -1,18 +1,17 @@
 const base=process.argv[2]||"https://online-scanner.pages.dev";
 
 const checks=[
-  [`${base}/background-remover?v=10.3.0`,[
-    "Processed locally · V10.3",
-    "app-v2.js?v=10.3.0",
-    "Fast uses the lightweight portrait model"
+  [`${base}/background-remover?v=10.4.0`,[
+    "Processed locally · V10.4",
+    "app-v2.js?v=10.4.0",
+    "6.63 MB quantized MODNet"
   ]],
-  [`${base}/assets/js/background/app-v2.js?v=10.3.0`,[
-    "Background Remover V10.3 speed-first build loaded",
-    "qualityMode:\"fast\"",
-    "buildFastMask",
-    "V10.3 fast extraction diagnostics",
-    "data-quality-mode",
-    "support:\"skipped\""
+  [`${base}/assets/js/background/app-v2.js?v=10.4.0`,[
+    "Background Remover V10.4 quantized multithread build loaded",
+    "dtype:\"q8\"",
+    "V10.4 runtime diagnostics",
+    "V10.4 q8 MODNet alpha diagnostics",
+    "MODNet q8 fast"
   ]]
 ];
 
@@ -36,5 +35,20 @@ for(const [url,expected] of checks){
   }
 }
 
+const page=await fetch(`${base}/background-remover?v=10.4.0`,{
+  cache:"no-store",
+  redirect:"manual"
+});
+
+const coop=page.headers.get("cross-origin-opener-policy");
+const coep=page.headers.get("cross-origin-embedder-policy");
+
+if(coop!=="same-origin"||!["credentialless","require-corp"].includes(coep)){
+  failed++;
+  console.error("FAIL isolation headers",{coop,coep});
+}else{
+  console.log("PASS isolation headers",{coop,coep});
+}
+
 if(failed)process.exitCode=1;
-else console.log("Background Remover V10.3 deployment verified.");
+else console.log("Background Remover V10.4 deployment verified.");

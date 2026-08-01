@@ -1,5 +1,7 @@
 /*
   X-Content-Type-Options: nosniff
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(self), microphone=(), geolocation=()
   X-Robots-Tag: noindex, nofollow, noarchive, nosnippet
@@ -7,4 +9,4 @@
 
 /background-remover
   Cache-Control: no-store, no-cache, must-revalidate
-  X-Background-Remover-Build: v10.3
+  X-Background-Remover-Build: v10.4
