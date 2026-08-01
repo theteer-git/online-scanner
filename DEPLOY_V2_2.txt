@@ -1,0 +1,37 @@
+BACKGROUND REMOVER V2.2
+
+This build fixes silent button behaviour.
+
+Changes:
+- Immediate visible response when Remove background is clicked
+- Explicit model and inference timeouts
+- Stable WASM + fp32 model configuration
+- Official MODNet RawImage.toCanvas() output conversion
+- Always-visible V2.2 marker
+- No _redirects file
+
+DEPLOY:
+
+1. Copy every extracted file into D:\cam and replace existing files.
+2. Delete D:\cam\_redirects if it still exists.
+3. Keep D:\cam\.git unchanged.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Fix silent background removal and model output"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+https://online-scanner.pages.dev/background-remover?v=2.2.0
+
+The top-right header must show:
+Processed locally · V2.2
+
+When clicked, the button must immediately change to:
+Starting…

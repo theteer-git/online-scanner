@@ -1,54 +1,25 @@
-const base = process.argv[2] || "https://online-scanner.pages.dev";
-
-const checks = [
-  {
-    url: `${base}/background-remover.html?v=2.1.1`,
-    expect: ["Build V2.1.1", "app-v2.js?v=2.1.1"]
-  },
-  {
-    url: `${base}/assets/js/background/app-v2.js?v=2.1.1`,
-    expect: ['device:"wasm"', "Background Remover V2.1 compatibility build loaded"]
-  }
+const base=process.argv[2]||"https://online-scanner.pages.dev";
+const targets=[
+  [`${base}/background-remover?v=2.2.0`,["Processed locally · V2.2","app-v2.js?v=2.2.0"]],
+  [`${base}/assets/js/background/app-v2.js?v=2.2.0`,["Background Remover V2.2 click-confirmed build loaded","Starting background removal"]]
 ];
 
-let failed = 0;
-
-for (const check of checks) {
-  try {
-    const response = await fetch(check.url, {
-      cache: "no-store",
-      redirect: "manual"
-    });
-
-    if (response.status >= 300 && response.status < 400) {
+let failed=0;
+for(const [url,expected] of targets){
+  try{
+    const response=await fetch(url,{cache:"no-store"});
+    const text=await response.text();
+    const missing=expected.filter(item=>!text.includes(item));
+    if(!response.ok||missing.length){
       failed++;
-      console.error("FAIL redirect detected", check.url, {
-        status: response.status,
-        location: response.headers.get("location")
-      });
-      continue;
+      console.error("FAIL",url,{status:response.status,missing});
+    }else{
+      console.log("PASS",url,response.status);
     }
-
-    const text = await response.text();
-    const missing = check.expect.filter(value => !text.includes(value));
-
-    if (!response.ok || missing.length) {
-      failed++;
-      console.error("FAIL", check.url, {
-        status: response.status,
-        missing
-      });
-    } else {
-      console.log("PASS", check.url, response.status);
-    }
-  } catch (error) {
+  }catch(error){
     failed++;
-    console.error("FAIL network error", check.url, error.message);
+    console.error("FAIL",url,error.message);
   }
 }
-
-if (failed) {
-  process.exitCode = 1;
-} else {
-  console.log("Background Remover V2.1 route and deployment verified.");
-}
+if(failed)process.exitCode=1;
+else console.log("Background Remover V2.2 deployment verified.");

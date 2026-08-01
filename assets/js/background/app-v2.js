@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V2.1 compatibility build loaded");
+console.info("Background Remover V2.2 click-confirmed build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -19,6 +19,15 @@ const state={
 };
 
 function setStatus(text){els.status.textContent=text}
+function withTimeout(promise, milliseconds, label){
+  let timer;
+  return Promise.race([
+    promise.finally(()=>clearTimeout(timer)),
+    new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(new Error(`${label} timed out. Check the browser console and network connection.`)),milliseconds);
+    })
+  ]);
+}
 function setBusy(busy,text=""){
   state.busy=busy;
   els.remove.disabled=busy||!state.sourceBitmap;
@@ -60,58 +69,129 @@ async function loadImage(file){
 function resizeOutput(w,h){els.canvas.width=w;els.canvas.height=h}
 async function ensureModel(){
   if(state.segmenter)return state.segmenter;
-  els.progress.classList.remove("hidden");els.progress.value=2;
-  setBusy(true,"Downloading portrait model…");
-  const {pipeline,env}=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1");
-  env.allowLocalModels=false;env.useBrowserCache=true;
-  const options={
-    device:"wasm",
-    dtype:"q8",
-    progress_callback:event=>{
-      if(event?.progress!=null){
-        const progress=Math.max(2,Math.min(98,Math.round(event.progress)));
-        els.progress.value=progress;
-        setStatus(`Downloading model… ${progress}%`);
-      }
-    }
-  };
-  state.segmenter=await pipeline(
-    "background-removal",
-    "Xenova/modnet",
-    options
+
+  els.progress.classList.remove("hidden");
+  els.progress.removeAttribute("value");
+  setBusy(true,"Preparing AI model…");
+  els.remove.textContent="Preparing model…";
+
+  const transformersModule=await withTimeout(
+    import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1"),
+    30000,
+    "Transformers.js download"
   );
-  els.progress.value=100;setTimeout(()=>els.progress.classList.add("hidden"),500);
+
+  const {pipeline,env}=transformersModule;
+  env.allowLocalModels=false;
+  env.useBrowserCache=true;
+
+  setStatus("Downloading portrait model…");
+  state.segmenter=await withTimeout(
+    pipeline(
+      "background-removal",
+      "Xenova/modnet",
+      {
+        device:"wasm",
+        dtype:"fp32",
+        progress_callback:event=>{
+          if(event?.progress!=null){
+            const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
+            els.progress.value=progress;
+            setStatus(`Downloading portrait model… ${progress}%`);
+          }else if(event?.status){
+            setStatus(`Model: ${event.status}`);
+          }
+        }
+      }
+    ),
+    180000,
+    "Portrait model download"
+  );
+
+  els.progress.value=100;
+  setStatus("Model ready");
+  els.remove.textContent="Remove background";
+  setTimeout(()=>els.progress.classList.add("hidden"),600);
   return state.segmenter;
 }
-async function rawImageToBitmap(raw){
-  const canvas=document.createElement("canvas");canvas.width=raw.width;canvas.height=raw.height;
-  const imageData=new ImageData(new Uint8ClampedArray(raw.data),raw.width,raw.height);
-  canvas.getContext("2d").putImageData(imageData,0,0);
-  return createImageBitmap(canvas);
-}
+
 async function removeBackground(){
-  if(!state.sourceFile||state.busy)return;
+  if(!state.sourceFile){
+    setStatus("Choose an image first");
+    return;
+  }
+  if(state.busy)return;
+
+  els.remove.textContent="Starting…";
+  setStatus("Starting background removal…");
+  els.progress.classList.remove("hidden");
+  els.progress.removeAttribute("value");
+
+  // Yield once so Chrome paints the feedback before loading the model.
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+
   try{
     const segmenter=await ensureModel();
+
     setBusy(true,"Removing background…");
+    els.remove.textContent="Removing…";
+
     const url=URL.createObjectURL(state.sourceFile);
     let result;
-    try{result=await segmenter(url)}finally{URL.revokeObjectURL(url)}
+    try{
+      result=await withTimeout(
+        segmenter(url),
+        180000,
+        "Background removal"
+      );
+    }finally{
+      URL.revokeObjectURL(url);
+    }
+
     const raw=Array.isArray(result)?result[0]:result;
-    if(!raw||raw.channels!==4)throw new Error("The browser model returned an invalid image.");
+    if(!raw)throw new Error("The portrait model returned no output.");
+
+    const cutoutCanvas=typeof raw.toCanvas==="function"
+      ? raw.toCanvas()
+      : null;
+
+    if(!cutoutCanvas)throw new Error("The portrait model output cannot be converted to a canvas.");
+
     state.rawCutout?.close?.();
-    state.rawCutout=await rawImageToBitmap(raw);
-    const work=document.createElement("canvas");work.width=raw.width;work.height=raw.height;
-    const workCtx=work.getContext("2d",{willReadFrequently:true});workCtx.drawImage(state.rawCutout,0,0);
-    const data=workCtx.getImageData(0,0,work.width,work.height).data;
-    state.mask=new Uint8ClampedArray(work.width*work.height);
-    for(let p=0,i=3;p<state.mask.length;p++,i+=4)state.mask[p]=data[i];
-    state.history=[];state.future=[];
-    resizeOutput(raw.width,raw.height);
-    els.compare.disabled=false;els.download.disabled=false;
-    updateHistoryButtons();render();setBusy(false,"Background removed");
-  }catch(error){setBusy(false,"Removal failed");showError(error)}
+    state.rawCutout=await createImageBitmap(cutoutCanvas);
+
+    const workCtx=cutoutCanvas.getContext("2d",{willReadFrequently:true});
+    const data=workCtx.getImageData(0,0,cutoutCanvas.width,cutoutCanvas.height).data;
+
+    state.mask=new Uint8ClampedArray(cutoutCanvas.width*cutoutCanvas.height);
+    for(let p=0,i=3;p<state.mask.length;p++,i+=4){
+      state.mask[p]=data[i];
+    }
+
+    state.history=[];
+    state.future=[];
+    resizeOutput(cutoutCanvas.width,cutoutCanvas.height);
+
+    els.compare.disabled=false;
+    els.download.disabled=false;
+    updateHistoryButtons();
+    render();
+
+    els.progress.value=100;
+    els.remove.textContent="Background removed";
+    setBusy(false,"Background removed");
+    setTimeout(()=>{
+      els.remove.textContent="Remove again";
+      els.progress.classList.add("hidden");
+    },900);
+  }catch(error){
+    setBusy(false,"Removal failed");
+    els.remove.textContent="Try again";
+    els.progress.classList.add("hidden");
+    showError(error);
+  }
 }
+
 function adjustedMask(){
   if(!state.mask)return null;
   const w=els.canvas.width,h=els.canvas.height;
@@ -249,7 +329,14 @@ els.drop.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===
 ["dragenter","dragover"].forEach(name=>els.drop.addEventListener(name,event=>{event.preventDefault();els.drop.classList.add("dragover")}));
 ["dragleave","drop"].forEach(name=>els.drop.addEventListener(name,event=>{event.preventDefault();els.drop.classList.remove("dragover")}));
 els.drop.addEventListener("drop",event=>loadImage(event.dataTransfer.files[0]).catch(showError));
-els.remove.addEventListener("click",removeBackground);
+els.remove.addEventListener("click",event=>{
+  event.preventDefault();
+  console.info("Remove background clicked", {
+    hasFile:Boolean(state.sourceFile),
+    busy:state.busy
+  });
+  removeBackground();
+});
 $("#newImageButton").addEventListener("click",resetApp);
 els.download.addEventListener("click",()=>els.downloadDialog.showModal());
 $("#confirmDownloadButton").addEventListener("click",download);
