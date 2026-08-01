@@ -1,0 +1,53 @@
+BACKGROUND REMOVER V9 — BIREFNET PROFESSIONAL MATTE
+
+V9 is the first version to replace the primary segmentation backbone.
+
+Pipeline:
+1. BiRefNet Portrait generates a high-resolution 1024px dichotomous matte.
+2. DETR Panoptic selects the real person and individual support objects.
+3. The fine matte is constrained to the selected person instance.
+4. Approved chair/sofa/bench instances touching the person are merged.
+5. Person-anchored cleanup removes detached fragments.
+6. Internal holes and final edge alpha are refined.
+
+Compatibility:
+- Professional mode requires WebGPU and uses the fp16 BiRefNet model.
+- The first model download is approximately 490 MB.
+- The browser caches the model after the first successful download.
+- If WebGPU or BiRefNet fails, V9 automatically uses the working MODNet fallback.
+- Images remain in local browser memory and are never uploaded by this app.
+
+License:
+BiRefNet Portrait ONNX is MIT-licensed.
+
+DEPLOY
+
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Upgrade primary matte to BiRefNet professional extraction"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=9.0.0
+
+The header must show:
+
+Processed locally · V9
+
+For the first test:
+- Keep the tab open while the large model downloads.
+- Do not refresh during model download.
+- Open DevTools Console and look for:
+  V9 BiRefNet alpha diagnostics
+  V9 extraction backend

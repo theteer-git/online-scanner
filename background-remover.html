@@ -7,7 +7,7 @@
   <meta name="description" content="Remove and replace image backgrounds privately in your browser.">
   <meta name="theme-color" content="#ffffff">
   <title>Private Background Remover</title>
-  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=8.0.0">
+  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=9.0.0">
 </head>
 <body>
   <header class="app-header">
@@ -19,7 +19,7 @@
       <a href="./">Scanner</a>
       <a class="active" href="./background-remover.html">Remove Background</a>
     </nav>
-    <div class="privacy"><span></span>Processed locally · V8</div>
+    <div class="privacy"><span></span>Processed locally · V9</div>
   </header>
 
   <main>
@@ -33,7 +33,7 @@
         Choose image
       </label>
       <div id="dropZone" class="drop-zone" tabindex="0">or drop an image here</div>
-      <p class="first-run">The first run downloads and caches the portrait-matting model. <strong>Build V8</strong></p>
+      <p class="first-run">The first run downloads and caches the portrait-matting model. <strong>Build V9</strong></p>
     </section>
 
     <section id="workspaceView" class="workspace hidden">
@@ -122,7 +122,7 @@
               <button id="personOnlyButton" class="mode-button" data-subject-mode="person" type="button">Person only</button>
               <button id="smartSubjectButton" class="mode-button active" data-subject-mode="smart" type="button">Person + support</button>
             </div>
-            <p class="control-help">Person + support is anchored to the selected panoptic person instance. Small person–chair gaps are bridged, while every detached curtain, floor or object fragment is discarded before edge refinement.</p>
+            <p class="control-help">Professional V9 uses BiRefNet Portrait for the primary high-resolution matte, DETR Panoptic for person/support selection, and person-anchored cleanup. The first desktop run downloads a large model; later runs use browser cache.</p>
           </section>
 
           <section class="panel-card">
@@ -207,6 +207,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./assets/js/background/app-v2.js?v=8.0.0"></script>
+  <script type="module" src="./assets/js/background/app-v2.js?v=9.0.0"></script>
 </body>
 </html>

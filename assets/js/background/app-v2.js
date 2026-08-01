@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V8 person-anchored cleanup build loaded");
+console.info("Background Remover V9 BiRefNet professional build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -13,7 +13,7 @@ const els={
 
 const ctx=els.canvas.getContext("2d");
 const state={
-  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,pipelineFactory:null,panopticSegmenter:null,semanticLabels:[],bgBitmap:null,
+  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,AutoModel:null,AutoProcessor:null,pipelineFactory:null,panopticSegmenter:null,birefModel:null,birefProcessor:null,professionalBackend:null,semanticLabels:[],bgBitmap:null,
   background:"transparent",mode:"move",subjectX:0,subjectY:0,subjectScale:1,
   dragging:false,lastPointer:null,painting:false,history:[],future:[],busy:false,showOriginal:false
 };
@@ -84,6 +84,8 @@ async function ensureModel(){
   );
 
   const {AutoModel,AutoProcessor,RawImage,pipeline,env}=transformers;
+  state.AutoModel=AutoModel;
+  state.AutoProcessor=AutoProcessor;
   state.pipelineFactory=pipeline;
   env.allowLocalModels=false;
   env.useBrowserCache=true;
@@ -121,6 +123,173 @@ async function ensureModel(){
   setTimeout(()=>els.progress.classList.add("hidden"),600);
 
   return {model:state.model,processor:state.processor,RawImage:state.RawImage};
+}
+
+
+async function ensureBiRefNetModel(){
+  if(state.birefModel&&state.birefProcessor){
+    return {
+      model:state.birefModel,
+      processor:state.birefProcessor,
+      RawImage:state.RawImage
+    };
+  }
+
+  // Ensure Transformers.js and shared classes are available.
+  if(!state.AutoModel||!state.AutoProcessor||!state.RawImage){
+    await ensureModel();
+  }
+
+  if(!navigator.gpu){
+    throw new Error("Professional BiRefNet mode requires WebGPU on this browser.");
+  }
+
+  els.progress.classList.remove("hidden");
+  els.progress.removeAttribute("value");
+  setStatus("Preparing professional portrait model…");
+  els.remove.textContent="Loading professional model…";
+
+  const progress_callback=event=>{
+    if(event?.progress!=null){
+      const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
+      els.progress.value=progress;
+      setStatus(`Downloading professional model… ${progress}%`);
+    }else if(event?.status){
+      setStatus(`Professional model: ${event.status}`);
+    }
+  };
+
+  const modelId="onnx-community/BiRefNet-portrait-ONNX";
+
+  state.birefProcessor=await withTimeout(
+    state.AutoProcessor.from_pretrained(
+      modelId,
+      {progress_callback}
+    ),
+    300000,
+    "BiRefNet processor download"
+  );
+
+  state.birefModel=await withTimeout(
+    state.AutoModel.from_pretrained(
+      modelId,
+      {
+        device:"webgpu",
+        dtype:"fp16",
+        progress_callback
+      }
+    ),
+    1200000,
+    "BiRefNet model download"
+  );
+
+  state.professionalBackend="BiRefNet fp16 WebGPU";
+  els.progress.value=100;
+  setStatus("Professional model ready");
+  setTimeout(()=>els.progress.classList.add("hidden"),700);
+
+  return {
+    model:state.birefModel,
+    processor:state.birefProcessor,
+    RawImage:state.RawImage
+  };
+}
+
+async function buildBiRefNetMask(sourceUrl){
+  const {model,processor,RawImage}=await ensureBiRefNetModel();
+
+  setStatus("Reading full-resolution portrait…");
+  const image=await withTimeout(
+    RawImage.fromURL(sourceUrl),
+    30000,
+    "Professional image decoding"
+  );
+
+  setStatus("Preparing 1024px professional matte…");
+  const inputs=await withTimeout(
+    processor(image),
+    60000,
+    "BiRefNet preprocessing"
+  );
+
+  setStatus("Generating professional alpha matte…");
+  const prediction=await withTimeout(
+    model({input_image:inputs.pixel_values}),
+    600000,
+    "BiRefNet inference"
+  );
+
+  if(!prediction?.output_image){
+    throw new Error("BiRefNet returned no alpha matte.");
+  }
+
+  const tensor=prediction.output_image[0].sigmoid().mul(255).to("uint8");
+  const rawMask=await RawImage.fromTensor(tensor);
+  const resized=await rawMask.resize(
+    state.sourceBitmap.width,
+    state.sourceBitmap.height
+  );
+
+  const expected=state.sourceBitmap.width*state.sourceBitmap.height;
+  if(!resized?.data||resized.data.length<expected){
+    throw new Error("BiRefNet returned an incomplete alpha matte.");
+  }
+
+  const channels=Math.max(1,Math.round(resized.data.length/expected));
+  const mask=new Uint8ClampedArray(expected);
+
+  let minimum=255;
+  let maximum=0;
+  let foreground=0;
+
+  for(let i=0;i<expected;i++){
+    const alpha=resized.data[i*channels];
+    mask[i]=alpha;
+    if(alpha<minimum)minimum=alpha;
+    if(alpha>maximum)maximum=alpha;
+    if(alpha>8)foreground++;
+  }
+
+  console.info("V9 BiRefNet alpha diagnostics",{
+    backend:state.professionalBackend,
+    width:state.sourceBitmap.width,
+    height:state.sourceBitmap.height,
+    minimum,
+    maximum,
+    foregroundRatio:foreground/mask.length
+  });
+
+  if(maximum<20){
+    throw new Error("BiRefNet produced an empty foreground matte.");
+  }
+  if(minimum>235){
+    throw new Error("BiRefNet treated the entire image as foreground.");
+  }
+
+  return mask;
+}
+
+async function buildProfessionalOrFallbackMask(sourceUrl){
+  try{
+    setStatus("Starting professional V9 extraction…");
+    const mask=await buildBiRefNetMask(sourceUrl);
+    return {
+      mask,
+      backend:"BiRefNet Portrait"
+    };
+  }catch(error){
+    console.warn("V9 professional model unavailable; using MODNet fallback.",error);
+    state.birefModel=null;
+    state.birefProcessor=null;
+    state.professionalBackend="MODNet fallback";
+    setStatus("Professional model unavailable; using compatible portrait mode…");
+
+    const mask=await buildAlphaMask(sourceUrl);
+    return {
+      mask,
+      backend:"MODNet fallback"
+    };
+  }
 }
 
 async function buildAlphaMask(sourceUrl){
@@ -296,7 +465,7 @@ function boxesNear(a,b,padding){
   );
 }
 
-function constrainFinePersonMask(modnetMask,instanceMask){
+function constrainFinePersonMask(primaryFineMask,instanceMask){
   const width=state.sourceBitmap.width;
   const height=state.sourceBitmap.height;
 
@@ -320,13 +489,13 @@ function constrainFinePersonMask(modnetMask,instanceMask){
   gateCtx.filter="none";
   const gateData=gateCtx.getImageData(0,0,width,height).data;
 
-  const refined=new Uint8ClampedArray(modnetMask.length);
+  const refined=new Uint8ClampedArray(primaryFineMask.length);
   let removed=0;
 
   for(let i=0,p=3;i<refined.length;i++,p+=4){
     const gate=gateData[p];
-    refined[i]=gate>3?modnetMask[i]:0;
-    if(modnetMask[i]>20&&refined[i]===0)removed++;
+    refined[i]=gate>3?primaryFineMask[i]:0;
+    if(primaryFineMask[i]>20&&refined[i]===0)removed++;
   }
 
   console.info("V6 person constraint diagnostics",{
@@ -732,11 +901,11 @@ function refineProfessionalMatte(finePersonMask,combinedMask,panopticPersonMask,
   const noIslands=removeTinyEdgeIslands(anchored,panopticPersonMask,width,height);
   const filled=fillSmallInternalHoles(noIslands,width,height);
   const feathered=featherMatte(filled,width,height);
-  console.info('V8 matte refinement diagnostics',{width,height,anchor:'panoptic-person-instance'});
+  console.info('V9 matte refinement diagnostics',{width,height,anchor:'panoptic-person-instance'});
   return feathered;
 }
 
-async function createPanopticSubjectMasks(modnetMask,sourceUrl){
+async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
   const segmenter=await ensurePanopticSegmenter();
 
   setStatus("Detecting individual foreground objects…");
@@ -780,7 +949,7 @@ async function createPanopticSubjectMasks(modnetMask,sourceUrl){
 
   // Select the person instance that overlaps the MODNet portrait matte most.
   for(const candidate of personCandidates){
-    candidate.overlap=intersectionScore(modnetMask,candidate.mask);
+    candidate.overlap=intersectionScore(primaryFineMask,candidate.mask);
   }
   personCandidates.sort((a,b)=>
     (b.overlap-a.overlap)||
@@ -788,7 +957,7 @@ async function createPanopticSubjectMasks(modnetMask,sourceUrl){
   );
 
   const selectedPerson=personCandidates[0];
-  const refinedPerson=constrainFinePersonMask(modnetMask,selectedPerson.mask);
+  const refinedPerson=constrainFinePersonMask(primaryFineMask,selectedPerson.mask);
   const smart=cloneMask(refinedPerson);
   const keptSupports=[];
   const rejectedSupports=[];
@@ -832,7 +1001,7 @@ async function createPanopticSubjectMasks(modnetMask,sourceUrl){
     height
   );
 
-  console.info("V8 panoptic + person-anchored diagnostics",{
+  console.info("V9 BiRefNet + panoptic diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -908,9 +1077,14 @@ async function removeBackground(){
     setBusy(true,"Preparing local AI…");
     const url=URL.createObjectURL(state.sourceFile);
     try{
-      const rawModnetMask=await buildAlphaMask(url);
-      setStatus("Selecting the real person instance…");
-      const panoptic=await createPanopticSubjectMasks(rawModnetMask,url);
+      const primary=await buildProfessionalOrFallbackMask(url);
+      setStatus("Selecting the real person and support instances…");
+      const panoptic=await createPanopticSubjectMasks(primary.mask,url);
+      console.info("V9 extraction backend",{
+        primary:primary.backend,
+        support:"DETR Panoptic",
+        cleanup:"person-anchored"
+      });
 
       state.personMask=panoptic.personMask;
       state.smartMask=panoptic.smartMask;
