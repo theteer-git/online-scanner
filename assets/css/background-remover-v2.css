@@ -30,3 +30,5 @@ button,input,select{font:inherit}button{cursor:pointer}.hidden{display:none!impo
 
 .extraction-modes{grid-template-columns:1fr 1fr}
 .control-help{margin:10px 0 0;color:var(--muted);font-size:.74rem;line-height:1.45}
+
+.quality-modes{grid-template-columns:1fr 1fr}

@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V10.2 geometry refinement build loaded");
+console.info("Background Remover V10.3 speed-first build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -146,31 +146,6 @@ async function ensureModel(){
 
 
 
-async function warmupPrimaryModel(){
-  if(state.warmupStarted||state.mvanetSegmenter)return;
-  state.warmupStarted=true;
-
-  try{
-    await new Promise(resolve=>{
-      if("requestIdleCallback" in window){
-        requestIdleCallback(()=>resolve(),{timeout:2500});
-      }else{
-        setTimeout(resolve,1200);
-      }
-    });
-
-    if(document.visibilityState!=="visible")return;
-
-    setStatus("Preparing local AI in the background…");
-    await ensureMVANetSegmenter();
-    state.warmupComplete=true;
-    setStatus("Local AI ready");
-  }catch(error){
-    console.info("V10.1 background warmup skipped",error);
-    setStatus("Image ready");
-  }
-}
-
 async function ensureMVANetSegmenter(){
   if(state.mvanetSegmenter){
     return state.mvanetSegmenter;
@@ -301,7 +276,7 @@ async function buildMVANetMask(sourceUrl){
     if(alpha>8)foreground++;
   }
 
-  console.info("V10.2 MVANet alpha diagnostics",{
+  console.info("V10.3 MVANet alpha diagnostics",{
     backend:state.professionalBackend,
     sourceSize:[result.width,result.height],
     outputSize:[state.sourceBitmap.width,state.sourceBitmap.height],
@@ -320,9 +295,31 @@ async function buildMVANetMask(sourceUrl){
   return mask;
 }
 
+
+async function buildFastMask(sourceUrl){
+  setStatus("Running fast portrait extraction…");
+  const mask=await buildAlphaMask(sourceUrl);
+
+  console.info("V10.3 fast extraction diagnostics",{
+    backend:"MODNet WASM",
+    width:state.sourceBitmap.width,
+    height:state.sourceBitmap.height
+  });
+
+  return mask;
+}
+
 async function buildProfessionalOrFallbackMask(sourceUrl){
+  if(state.qualityMode==="fast"){
+    const mask=await buildFastMask(sourceUrl);
+    return {
+      mask,
+      backend:"MODNet fast"
+    };
+  }
+
   try{
-    setStatus("Starting V10 compatible extraction…");
+    setStatus("Starting V10.3 quality extraction…");
     const mask=await buildMVANetMask(sourceUrl);
 
     return {
@@ -330,12 +327,12 @@ async function buildProfessionalOrFallbackMask(sourceUrl){
       backend:"MVANet q8 WASM"
     };
   }catch(error){
-    console.warn("V10 MVANet unavailable; using MODNet fallback.",error);
+    console.warn("V10.3 MVANet unavailable; using MODNet fallback.",error);
     state.mvanetSegmenter=null;
     state.professionalBackend="MODNet fallback";
-    setStatus("MVANet unavailable; using lightweight compatible mode…");
+    setStatus("Quality model unavailable; using fast mode…");
 
-    const mask=await buildAlphaMask(sourceUrl);
+    const mask=await buildFastMask(sourceUrl);
     return {
       mask,
       backend:"MODNet fallback"
@@ -1035,7 +1032,7 @@ function suppressFloorResidue(mask,referenceMask,width,height){
     }
   }
 
-  console.info("V10.2 floor residue diagnostics",{
+  console.info("V10.3 floor residue diagnostics",{
     floorStart,
     removedPixels:removed
   });
@@ -1101,7 +1098,7 @@ function bridgeSupportColumns(mask,referenceMask,width,height){
     }
   }
 
-  console.info("V10.2 chair bridge diagnostics",{
+  console.info("V10.3 chair bridge diagnostics",{
     maxGap,
     bridgedPixels
   });
@@ -1161,7 +1158,7 @@ function refineV102PersonMask(mask,width,height){
   refined=protectFinePersonEdges(refined,mask,width,height);
   refined=smoothSupportEdgeBand(refined,mask,width,height);
 
-  console.info("V10.2 person geometry diagnostics",{
+  console.info("V10.3 person geometry diagnostics",{
     width,
     height
   });
@@ -1183,7 +1180,7 @@ function refineV102SupportMask(personMask,smartMask,width,height){
   refined=smoothSupportEdgeBand(refined,personMask,width,height);
   refined=featherMatte(refined,width,height);
 
-  console.info("V10.2 support geometry diagnostics",{
+  console.info("V10.3 support geometry diagnostics",{
     width,
     height
   });
@@ -1370,7 +1367,7 @@ async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
     height
   );
 
-  console.info("V10.2 MVANet + panoptic diagnostics",{
+  console.info("V10.3 MVANet + panoptic diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -1475,7 +1472,7 @@ async function removeBackground(){
         state.semanticLabels=panoptic.keptSupports;
         state.mask=cloneMask(state.smartMask);
 
-        console.info("V10.2 extraction backend",{
+        console.info("V10.3 extraction backend",{
           primary:primary.backend,
           support:"DETR Panoptic",
           cleanup:"person-anchored"
@@ -1491,7 +1488,7 @@ async function removeBackground(){
         state.semanticLabels=[];
         state.mask=cloneMask(state.personMask);
 
-        console.info("V10.2 extraction backend",{
+        console.info("V10.3 extraction backend",{
           primary:primary.backend,
           support:"skipped",
           cleanup:"largest-person-component"
@@ -1682,6 +1679,14 @@ document.querySelectorAll(".background-choice").forEach(button=>button.addEventL
 els.bgInput.addEventListener("change",event=>loadBackground(event.target.files[0]).catch(showError));
 [els.bgColour,els.blur,els.softness,els.cleanup].forEach(input=>input.addEventListener("input",render));
 document.querySelectorAll(".mode-button[data-mode]").forEach(button=>button.addEventListener("click",()=>setMode(button.dataset.mode)));
+document.querySelectorAll("[data-quality-mode]").forEach(button=>button.addEventListener("click",()=>{
+  state.qualityMode=button.dataset.qualityMode;
+  document.querySelectorAll("[data-quality-mode]").forEach(item=>{
+    item.classList.toggle("active",item===button);
+  });
+  setStatus(state.qualityMode==="fast"?"Fast mode selected":"Quality mode selected");
+}));
+
 document.querySelectorAll("[data-subject-mode]").forEach(button=>button.addEventListener("click",()=>{
   if(!state.personMask)return;
   applySubjectMode(button.dataset.subjectMode).catch(showError);
@@ -1709,4 +1714,3 @@ els.viewport.addEventListener("pointerleave",()=>els.brushCursor.classList.add("
 els.viewport.addEventListener("pointerenter",()=>{if(state.mode!=="move")els.brushCursor.classList.remove("hidden")});
 window.addEventListener("beforeunload",()=>{state.sourceBitmap?.close?.();state.bgBitmap?.close?.()});
 
-window.addEventListener("load",()=>warmupPrimaryModel());

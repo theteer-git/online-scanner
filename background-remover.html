@@ -7,7 +7,7 @@
   <meta name="description" content="Remove and replace image backgrounds privately in your browser.">
   <meta name="theme-color" content="#ffffff">
   <title>Private Background Remover</title>
-  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=10.2.0">
+  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=10.3.0">
 </head>
 <body>
   <header class="app-header">
@@ -19,7 +19,7 @@
       <a href="./">Scanner</a>
       <a class="active" href="./background-remover.html">Remove Background</a>
     </nav>
-    <div class="privacy"><span></span>Processed locally · V10.2</div>
+    <div class="privacy"><span></span>Processed locally · V10.3</div>
   </header>
 
   <main>
@@ -33,7 +33,7 @@
         Choose image
       </label>
       <div id="dropZone" class="drop-zone" tabindex="0">or drop an image here</div>
-      <p class="first-run">The first run downloads and caches the portrait-matting model. <strong>Build V10.2</strong></p>
+      <p class="first-run">The first run downloads and caches the portrait-matting model. <strong>Build V10.3</strong></p>
     </section>
 
     <section id="workspaceView" class="workspace hidden">
@@ -114,6 +114,20 @@
           <section class="panel-card">
             <div class="panel-heading">
               <div>
+                <small>PROCESSING</small>
+                <h2>Choose speed</h2>
+              </div>
+            </div>
+            <div class="mode-buttons quality-modes">
+              <button class="mode-button active" data-quality-mode="fast" type="button">Fast</button>
+              <button class="mode-button" data-quality-mode="quality" type="button">Quality</button>
+            </div>
+            <p class="control-help">Fast uses the lightweight portrait model. Quality uses MVANet and takes longer.</p>
+          </section>
+
+          <section class="panel-card">
+            <div class="panel-heading">
+              <div>
                 <small>EXTRACTION</small>
                 <h2>Choose what to keep</h2>
               </div>
@@ -122,7 +136,7 @@
               <button id="personOnlyButton" class="mode-button active" data-subject-mode="person" type="button">Person only</button>
               <button id="smartSubjectButton" class="mode-button" data-subject-mode="smart" type="button">Person + support</button>
             </div>
-            <p class="control-help">V10.2 keeps the fast V10.1 workflow and adds targeted chair recovery, floor-residue removal and gentler edge protection around the person.</p>
+            <p class="control-help">V10.3 makes Fast mode the default. MODNet handles ordinary portraits quickly, while MVANet Quality mode and DETR support-object processing load only when selected.</p>
           </section>
 
           <section class="panel-card">
@@ -207,6 +221,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./assets/js/background/app-v2.js?v=10.2.0"></script>
+  <script type="module" src="./assets/js/background/app-v2.js?v=10.3.0"></script>
 </body>
 </html>
