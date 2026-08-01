@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V9 BiRefNet professional build loaded");
+console.info("Background Remover V10 MVANet compatibility build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -13,7 +13,7 @@ const els={
 
 const ctx=els.canvas.getContext("2d");
 const state={
-  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,AutoModel:null,AutoProcessor:null,pipelineFactory:null,panopticSegmenter:null,birefModel:null,birefProcessor:null,professionalBackend:null,semanticLabels:[],bgBitmap:null,
+  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,AutoModel:null,AutoProcessor:null,pipelineFactory:null,panopticSegmenter:null,mvanetSegmenter:null,professionalBackend:null,semanticLabels:[],bgBitmap:null,
   background:"transparent",mode:"move",subjectX:0,subjectY:0,subjectScale:1,
   dragging:false,lastPointer:null,painting:false,history:[],future:[],busy:false,showOriginal:false
 };
@@ -67,15 +67,16 @@ async function loadImage(file){
   setStatus("Image ready");
 }
 function resizeOutput(w,h){els.canvas.width=w;els.canvas.height=h}
-async function ensureModel(){
-  if(state.model&&state.processor&&state.RawImage){
-    return {model:state.model,processor:state.processor,RawImage:state.RawImage};
-  }
 
-  els.progress.classList.remove("hidden");
-  els.progress.removeAttribute("value");
-  setBusy(true,"Preparing portrait model…");
-  els.remove.textContent="Preparing model…";
+async function ensureTransformersRuntime(){
+  if(state.pipelineFactory&&state.RawImage){
+    return {
+      pipeline:state.pipelineFactory,
+      RawImage:state.RawImage,
+      AutoModel:state.AutoModel,
+      AutoProcessor:state.AutoProcessor
+    };
+  }
 
   const transformers=await withTimeout(
     import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1"),
@@ -86,9 +87,26 @@ async function ensureModel(){
   const {AutoModel,AutoProcessor,RawImage,pipeline,env}=transformers;
   state.AutoModel=AutoModel;
   state.AutoProcessor=AutoProcessor;
+  state.RawImage=RawImage;
   state.pipelineFactory=pipeline;
+
   env.allowLocalModels=false;
   env.useBrowserCache=true;
+
+  return {pipeline,RawImage,AutoModel,AutoProcessor};
+}
+
+async function ensureModel(){
+  if(state.model&&state.processor&&state.RawImage){
+    return {model:state.model,processor:state.processor,RawImage:state.RawImage};
+  }
+
+  els.progress.classList.remove("hidden");
+  els.progress.removeAttribute("value");
+  setBusy(true,"Preparing portrait model…");
+  els.remove.textContent="Preparing model…";
+
+  const {AutoModel,AutoProcessor,RawImage}=await ensureTransformersRuntime();
 
   const progress_callback=event=>{
     if(event?.progress!=null){
@@ -126,144 +144,151 @@ async function ensureModel(){
 }
 
 
-async function ensureBiRefNetModel(){
-  if(state.birefModel&&state.birefProcessor){
-    return {
-      model:state.birefModel,
-      processor:state.birefProcessor,
-      RawImage:state.RawImage
-    };
+
+async function ensureMVANetSegmenter(){
+  if(state.mvanetSegmenter){
+    return state.mvanetSegmenter;
   }
 
-  // Ensure Transformers.js and shared classes are available.
-  if(!state.AutoModel||!state.AutoProcessor||!state.RawImage){
-    await ensureModel();
-  }
-
-  if(!navigator.gpu){
-    throw new Error("Professional BiRefNet mode requires WebGPU on this browser.");
-  }
+  const {pipeline}=await ensureTransformersRuntime();
 
   els.progress.classList.remove("hidden");
   els.progress.removeAttribute("value");
-  setStatus("Preparing professional portrait model…");
-  els.remove.textContent="Loading professional model…";
+  setStatus("Preparing compatible professional model…");
+  els.remove.textContent="Loading MVANet…";
 
   const progress_callback=event=>{
     if(event?.progress!=null){
       const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
       els.progress.value=progress;
-      setStatus(`Downloading professional model… ${progress}%`);
+      setStatus(`Downloading MVANet… ${progress}%`);
     }else if(event?.status){
-      setStatus(`Professional model: ${event.status}`);
+      setStatus(`MVANet: ${event.status}`);
     }
   };
 
-  const modelId="onnx-community/BiRefNet-portrait-ONNX";
-
-  state.birefProcessor=await withTimeout(
-    state.AutoProcessor.from_pretrained(
-      modelId,
-      {progress_callback}
-    ),
-    300000,
-    "BiRefNet processor download"
-  );
-
-  state.birefModel=await withTimeout(
-    state.AutoModel.from_pretrained(
-      modelId,
+  state.mvanetSegmenter=await withTimeout(
+    pipeline(
+      "background-removal",
+      "onnx-community/MVANet-ONNX",
       {
-        device:"webgpu",
-        dtype:"fp16",
+        device:"wasm",
+        dtype:"q8",
         progress_callback
       }
     ),
-    1200000,
-    "BiRefNet model download"
+    600000,
+    "MVANet quantized model download"
   );
 
-  state.professionalBackend="BiRefNet fp16 WebGPU";
+  state.professionalBackend="MVANet q8 WASM";
   els.progress.value=100;
-  setStatus("Professional model ready");
+  setStatus("MVANet ready");
+  els.remove.textContent="Remove background";
   setTimeout(()=>els.progress.classList.add("hidden"),700);
 
-  return {
-    model:state.birefModel,
-    processor:state.birefProcessor,
-    RawImage:state.RawImage
-  };
+  return state.mvanetSegmenter;
 }
 
-async function buildBiRefNetMask(sourceUrl){
-  const {model,processor,RawImage}=await ensureBiRefNetModel();
-
-  setStatus("Reading full-resolution portrait…");
-  const image=await withTimeout(
-    RawImage.fromURL(sourceUrl),
-    30000,
-    "Professional image decoding"
-  );
-
-  setStatus("Preparing 1024px professional matte…");
-  const inputs=await withTimeout(
-    processor(image),
-    60000,
-    "BiRefNet preprocessing"
-  );
-
-  setStatus("Generating professional alpha matte…");
-  const prediction=await withTimeout(
-    model({input_image:inputs.pixel_values}),
-    600000,
-    "BiRefNet inference"
-  );
-
-  if(!prediction?.output_image){
-    throw new Error("BiRefNet returned no alpha matte.");
+function rawImageAlphaToMask(rawImage,targetWidth,targetHeight){
+  if(!rawImage?.data){
+    throw new Error("MVANet returned no image data.");
   }
 
-  const tensor=prediction.output_image[0].sigmoid().mul(255).to("uint8");
-  const rawMask=await RawImage.fromTensor(tensor);
-  const resized=await rawMask.resize(
+  const expected=rawImage.width*rawImage.height;
+  if(!expected||rawImage.data.length<expected){
+    throw new Error("MVANet returned incomplete image data.");
+  }
+
+  const channels=Math.max(1,Math.round(rawImage.data.length/expected));
+  const smallMask=new Uint8ClampedArray(expected);
+
+  for(let i=0;i<expected;i++){
+    if(channels>=4){
+      smallMask[i]=rawImage.data[i*channels+3];
+    }else if(channels===2){
+      smallMask[i]=rawImage.data[i*channels+1];
+    }else if(channels===1){
+      smallMask[i]=rawImage.data[i];
+    }else{
+      throw new Error("MVANet output does not contain an alpha channel.");
+    }
+  }
+
+  const sourceCanvas=document.createElement("canvas");
+  sourceCanvas.width=rawImage.width;
+  sourceCanvas.height=rawImage.height;
+  const sourceContext=sourceCanvas.getContext("2d");
+  const imageData=sourceContext.createImageData(rawImage.width,rawImage.height);
+
+  for(let i=0,p=3;i<smallMask.length;i++,p+=4){
+    imageData.data[p]=smallMask[i];
+  }
+  sourceContext.putImageData(imageData,0,0);
+
+  const targetCanvas=document.createElement("canvas");
+  targetCanvas.width=targetWidth;
+  targetCanvas.height=targetHeight;
+  const targetContext=targetCanvas.getContext("2d",{willReadFrequently:true});
+  targetContext.imageSmoothingEnabled=true;
+  targetContext.imageSmoothingQuality="high";
+  targetContext.drawImage(sourceCanvas,0,0,targetWidth,targetHeight);
+
+  const resized=targetContext.getImageData(0,0,targetWidth,targetHeight).data;
+  const mask=new Uint8ClampedArray(targetWidth*targetHeight);
+
+  for(let i=0,p=3;i<mask.length;i++,p+=4){
+    mask[i]=resized[p];
+  }
+
+  return mask;
+}
+
+async function buildMVANetMask(sourceUrl){
+  const segmenter=await ensureMVANetSegmenter();
+
+  setStatus("Generating compatible professional matte…");
+  const output=await withTimeout(
+    segmenter([sourceUrl]),
+    600000,
+    "MVANet background removal"
+  );
+
+  const result=Array.isArray(output)?output[0]:output;
+  if(!result){
+    throw new Error("MVANet returned no result.");
+  }
+
+  const mask=rawImageAlphaToMask(
+    result,
     state.sourceBitmap.width,
     state.sourceBitmap.height
   );
-
-  const expected=state.sourceBitmap.width*state.sourceBitmap.height;
-  if(!resized?.data||resized.data.length<expected){
-    throw new Error("BiRefNet returned an incomplete alpha matte.");
-  }
-
-  const channels=Math.max(1,Math.round(resized.data.length/expected));
-  const mask=new Uint8ClampedArray(expected);
 
   let minimum=255;
   let maximum=0;
   let foreground=0;
 
-  for(let i=0;i<expected;i++){
-    const alpha=resized.data[i*channels];
-    mask[i]=alpha;
+  for(const alpha of mask){
     if(alpha<minimum)minimum=alpha;
     if(alpha>maximum)maximum=alpha;
     if(alpha>8)foreground++;
   }
 
-  console.info("V9 BiRefNet alpha diagnostics",{
+  console.info("V10 MVANet alpha diagnostics",{
     backend:state.professionalBackend,
-    width:state.sourceBitmap.width,
-    height:state.sourceBitmap.height,
+    sourceSize:[result.width,result.height],
+    outputSize:[state.sourceBitmap.width,state.sourceBitmap.height],
     minimum,
     maximum,
     foregroundRatio:foreground/mask.length
   });
 
   if(maximum<20){
-    throw new Error("BiRefNet produced an empty foreground matte.");
+    throw new Error("MVANet produced an empty foreground matte.");
   }
   if(minimum>235){
-    throw new Error("BiRefNet treated the entire image as foreground.");
+    throw new Error("MVANet treated the entire image as foreground.");
   }
 
   return mask;
@@ -271,18 +296,18 @@ async function buildBiRefNetMask(sourceUrl){
 
 async function buildProfessionalOrFallbackMask(sourceUrl){
   try{
-    setStatus("Starting professional V9 extraction…");
-    const mask=await buildBiRefNetMask(sourceUrl);
+    setStatus("Starting V10 compatible extraction…");
+    const mask=await buildMVANetMask(sourceUrl);
+
     return {
       mask,
-      backend:"BiRefNet Portrait"
+      backend:"MVANet q8 WASM"
     };
   }catch(error){
-    console.warn("V9 professional model unavailable; using MODNet fallback.",error);
-    state.birefModel=null;
-    state.birefProcessor=null;
+    console.warn("V10 MVANet unavailable; using MODNet fallback.",error);
+    state.mvanetSegmenter=null;
     state.professionalBackend="MODNet fallback";
-    setStatus("Professional model unavailable; using compatible portrait mode…");
+    setStatus("MVANet unavailable; using lightweight compatible mode…");
 
     const mask=await buildAlphaMask(sourceUrl);
     return {
@@ -1001,7 +1026,7 @@ async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
     height
   );
 
-  console.info("V9 BiRefNet + panoptic diagnostics",{
+  console.info("V10 MVANet + panoptic diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -1080,7 +1105,7 @@ async function removeBackground(){
       const primary=await buildProfessionalOrFallbackMask(url);
       setStatus("Selecting the real person and support instances…");
       const panoptic=await createPanopticSubjectMasks(primary.mask,url);
-      console.info("V9 extraction backend",{
+      console.info("V10 extraction backend",{
         primary:primary.backend,
         support:"DETR Panoptic",
         cleanup:"person-anchored"

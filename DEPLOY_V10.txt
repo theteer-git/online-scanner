@@ -1,0 +1,60 @@
+BACKGROUND REMOVER V10 — MVANET COMPATIBILITY ENGINE
+
+Why V10:
+BiRefNet failed on the test computer because its WebGPU graph exceeded
+the device/browser storage-buffer and shader limits.
+
+V10 avoids that failure path.
+
+Pipeline:
+1. Quantized MVANet runs through the WASM backend.
+2. MVANet produces the primary foreground alpha matte.
+3. DETR Panoptic selects the real person and recognised support objects.
+4. Person-anchored cleanup removes detached fragments.
+5. MODNet remains an emergency fallback if MVANet cannot load or execute.
+
+Privacy and cost:
+- No image is uploaded by this application.
+- Processing occurs in browser memory.
+- No paid API is used.
+- No user document or image storage is used.
+- Hosting remains GitHub + Cloudflare Pages.
+- The quantized MVANet model is downloaded once and browser-cached.
+
+Expected first-run behaviour:
+- MVANet q8 download is approximately 141 MB.
+- WASM is slower than server GPU processing but broadly compatible.
+- DETR support-object mode may require its own cached model.
+- Later runs should reuse browser cache.
+
+DEPLOY
+
+1. Extract the ZIP.
+2. Copy all extracted files into D:\cam and replace existing files.
+3. Keep D:\cam\.git unchanged.
+4. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Replace BiRefNet WebGPU with MVANet WASM compatibility engine"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=10.0.0
+
+The header must show:
+
+Processed locally · V10
+
+Successful console markers:
+
+V10 MVANet alpha diagnostics
+V10 extraction backend
+V10 MVANet + panoptic diagnostics
