@@ -1,0 +1,42 @@
+BACKGROUND REMOVER V6 — PANOPTIC INSTANCE EXTRACTION
+
+V6 replaces ADE20K semantic scene masks with DETR Panoptic instances.
+
+Pipeline:
+1. MODNet creates the detailed portrait alpha matte.
+2. DETR Panoptic identifies separate person and object instances.
+3. The person instance that overlaps MODNet most is selected.
+4. The fine MODNet mask is constrained to that person instance,
+   removing detached false positives.
+5. Individual chair/sofa/bench instances are merged only when they
+   physically touch or closely overlap the selected person.
+
+Important:
+The first V6 run downloads a significantly larger panoptic model.
+It remains free and is cached by the browser, but first-run speed and
+memory use will be higher than V5.
+
+DEPLOY
+
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Upgrade extraction to panoptic person and support instances"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=6.0.0
+
+The header must show:
+
+Processed locally · V6

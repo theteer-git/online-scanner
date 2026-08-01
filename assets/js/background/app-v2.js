@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V5 semantic-support build loaded");
+console.info("Background Remover V6 panoptic-instance build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -13,7 +13,7 @@ const els={
 
 const ctx=els.canvas.getContext("2d");
 const state={
-  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,pipelineFactory:null,semanticSegmenter:null,semanticLabels:[],bgBitmap:null,
+  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,pipelineFactory:null,panopticSegmenter:null,semanticLabels:[],bgBitmap:null,
   background:"transparent",mode:"move",subjectX:0,subjectY:0,subjectScale:1,
   dragging:false,lastPointer:null,painting:false,history:[],future:[],busy:false,showOriginal:false
 };
@@ -182,6 +182,7 @@ async function buildAlphaMask(sourceUrl){
 
 
 
+
 const SUPPORT_LABELS=new Set([
   "chair",
   "armchair",
@@ -190,72 +191,8 @@ const SUPPORT_LABELS=new Set([
   "seat",
   "bench",
   "sofa",
-  "couch",
-  "wheelchair"
+  "couch"
 ]);
-
-const EXCLUDED_SCENE_LABELS=new Set([
-  "wall",
-  "floor",
-  "ceiling",
-  "curtain",
-  "windowpane",
-  "window",
-  "door",
-  "building",
-  "road",
-  "sidewalk",
-  "earth",
-  "grass",
-  "plant",
-  "tree",
-  "sky",
-  "bed",
-  "table",
-  "desk",
-  "cabinet",
-  "shelf",
-  "rug",
-  "carpet"
-]);
-
-async function ensureSemanticSegmenter(){
-  if(state.semanticSegmenter)return state.semanticSegmenter;
-
-  if(!state.pipelineFactory){
-    await ensureModel();
-  }
-
-  setStatus("Loading support-object model…");
-  els.progress.classList.remove("hidden");
-  els.progress.removeAttribute("value");
-
-  const progress_callback=event=>{
-    if(event?.progress!=null){
-      const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
-      els.progress.value=progress;
-      setStatus(`Downloading support-object model… ${progress}%`);
-    }else if(event?.status){
-      setStatus(`Support model: ${event.status}`);
-    }
-  };
-
-  state.semanticSegmenter=await withTimeout(
-    state.pipelineFactory(
-      "image-segmentation",
-      "Xenova/segformer-b0-finetuned-ade-512-512",
-      {
-        device:"wasm",
-        dtype:"q8",
-        progress_callback
-      }
-    ),
-    300000,
-    "Support-object model download"
-  );
-
-  return state.semanticSegmenter;
-}
 
 function normalizeLabel(label){
   return String(label||"")
@@ -265,59 +202,47 @@ function normalizeLabel(label){
     .trim();
 }
 
-function maskBoundingBox(mask,width,height,threshold=90){
-  let minX=width,minY=height,maxX=-1,maxY=-1,count=0;
-  for(let y=0;y<height;y++){
-    const row=y*width;
-    for(let x=0;x<width;x++){
-      if(mask[row+x]<threshold)continue;
-      if(x<minX)minX=x;if(x>maxX)maxX=x;
-      if(y<minY)minY=y;if(y>maxY)maxY=y;
-      count++;
+async function ensurePanopticSegmenter(){
+  if(state.panopticSegmenter)return state.panopticSegmenter;
+
+  if(!state.pipelineFactory){
+    await ensureModel();
+  }
+
+  setStatus("Loading panoptic instance model…");
+  els.progress.classList.remove("hidden");
+  els.progress.removeAttribute("value");
+
+  const progress_callback=event=>{
+    if(event?.progress!=null){
+      const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
+      els.progress.value=progress;
+      setStatus(`Downloading panoptic model… ${progress}%`);
+    }else if(event?.status){
+      setStatus(`Panoptic model: ${event.status}`);
     }
-  }
-  return count?{minX,minY,maxX,maxY,count}:null;
-}
+  };
 
-function boxesIntersect(a,b,padding=0){
-  if(!a||!b)return false;
-  return !(
-    a.maxX+padding<b.minX ||
-    b.maxX+padding<a.minX ||
-    a.maxY+padding<b.minY ||
-    b.maxY+padding<a.minY
+  state.panopticSegmenter=await withTimeout(
+    state.pipelineFactory(
+      "image-segmentation",
+      "Xenova/detr-resnet-50-panoptic",
+      {
+        device:"wasm",
+        dtype:"q8",
+        progress_callback
+      }
+    ),
+    420000,
+    "Panoptic model download"
   );
-}
 
-function createDilatedBinaryMask(mask,width,height,radius){
-  const sourceCanvas=document.createElement("canvas");
-  sourceCanvas.width=width;
-  sourceCanvas.height=height;
-  const sourceCtx=sourceCanvas.getContext("2d");
-  const image=sourceCtx.createImageData(width,height);
-  for(let i=0,p=3;i<mask.length;i++,p+=4){
-    image.data[p]=mask[i]>70?255:0;
-  }
-  sourceCtx.putImageData(image,0,0);
-
-  const dilated=document.createElement("canvas");
-  dilated.width=width;
-  dilated.height=height;
-  const dctx=dilated.getContext("2d",{willReadFrequently:true});
-  dctx.filter=`blur(${Math.max(1,radius/2)}px)`;
-  dctx.drawImage(sourceCanvas,0,0);
-  dctx.filter="none";
-  const data=dctx.getImageData(0,0,width,height).data;
-  const out=new Uint8Array(width*height);
-  for(let i=0,p=3;i<out.length;i++,p+=4){
-    out[i]=data[p]>4?1:0;
-  }
-  return out;
+  return state.panopticSegmenter;
 }
 
 async function rawMaskToFullResolution(rawMask,width,height){
   if(!rawMask?.resize||!rawMask?.data){
-    throw new Error("The semantic model returned an unsupported mask.");
+    throw new Error("The panoptic model returned an unsupported mask.");
   }
 
   const resized=await rawMask.resize(width,height);
@@ -331,117 +256,223 @@ async function rawMaskToFullResolution(rawMask,width,height){
   return output;
 }
 
-function supportTouchesPerson(supportMask,personMask,width,height){
-  const personBox=maskBoundingBox(personMask,width,height,80);
-  const supportBox=maskBoundingBox(supportMask,width,height,80);
-  if(!personBox||!supportBox)return false;
-
-  const padding=Math.round(Math.max(width,height)*.035);
-  if(!boxesIntersect(personBox,supportBox,padding))return false;
-
-  const dilated=createDilatedBinaryMask(personMask,width,height,padding);
-  let supportPixels=0,touchingPixels=0;
-
-  for(let i=0;i<supportMask.length;i++){
-    if(supportMask[i]<80)continue;
-    supportPixels++;
-    if(dilated[i])touchingPixels++;
+function maskBounds(mask,width,height,threshold=80){
+  let minX=width,minY=height,maxX=-1,maxY=-1,count=0;
+  for(let y=0;y<height;y++){
+    const row=y*width;
+    for(let x=0;x<width;x++){
+      if(mask[row+x]<threshold)continue;
+      if(x<minX)minX=x;
+      if(x>maxX)maxX=x;
+      if(y<minY)minY=y;
+      if(y>maxY)maxY=y;
+      count++;
+    }
   }
-
-  if(!supportPixels)return false;
-
-  const contactRatio=touchingPixels/supportPixels;
-  const supportCenterY=(supportBox.minY+supportBox.maxY)/2;
-  const personCenterY=(personBox.minY+personBox.maxY)/2;
-  const verticallyPlausible=supportCenterY>personBox.minY &&
-    supportBox.minY<personBox.maxY &&
-    supportCenterY>personCenterY*.72;
-
-  return contactRatio>.018 && verticallyPlausible;
+  return count?{minX,minY,maxX,maxY,count}:null;
 }
 
-async function createSemanticSupportMask(personMask,sourceUrl){
-  const segmenter=await ensureSemanticSegmenter();
+function intersectionScore(a,b){
+  let intersection=0,aCount=0,bCount=0;
+  const length=Math.min(a.length,b.length);
+  for(let i=0;i<length;i++){
+    const av=a[i]>70;
+    const bv=b[i]>70;
+    if(av)aCount++;
+    if(bv)bCount++;
+    if(av&&bv)intersection++;
+  }
+  if(!intersection)return 0;
+  return intersection/Math.max(1,Math.min(aCount,bCount));
+}
 
-  setStatus("Classifying support objects…");
+function boxesNear(a,b,padding){
+  if(!a||!b)return false;
+  return !(
+    a.maxX+padding<b.minX ||
+    b.maxX+padding<a.minX ||
+    a.maxY+padding<b.minY ||
+    b.maxY+padding<a.minY
+  );
+}
+
+function constrainFinePersonMask(modnetMask,instanceMask){
+  const width=state.sourceBitmap.width;
+  const height=state.sourceBitmap.height;
+
+  // Dilate the coarse person instance slightly so MODNet hair/fingers survive.
+  const coarseCanvas=document.createElement("canvas");
+  coarseCanvas.width=width;
+  coarseCanvas.height=height;
+  const coarseCtx=coarseCanvas.getContext("2d");
+  const coarseImage=coarseCtx.createImageData(width,height);
+  for(let i=0,p=3;i<instanceMask.length;i++,p+=4){
+    coarseImage.data[p]=instanceMask[i];
+  }
+  coarseCtx.putImageData(coarseImage,0,0);
+
+  const gateCanvas=document.createElement("canvas");
+  gateCanvas.width=width;
+  gateCanvas.height=height;
+  const gateCtx=gateCanvas.getContext("2d",{willReadFrequently:true});
+  gateCtx.filter=`blur(${Math.max(2,Math.round(Math.max(width,height)*.006))}px)`;
+  gateCtx.drawImage(coarseCanvas,0,0);
+  gateCtx.filter="none";
+  const gateData=gateCtx.getImageData(0,0,width,height).data;
+
+  const refined=new Uint8ClampedArray(modnetMask.length);
+  let removed=0;
+
+  for(let i=0,p=3;i<refined.length;i++,p+=4){
+    const gate=gateData[p];
+    refined[i]=gate>3?modnetMask[i]:0;
+    if(modnetMask[i]>20&&refined[i]===0)removed++;
+  }
+
+  console.info("V6 person constraint diagnostics",{
+    removedDetachedPixels:removed,
+    removedRatio:removed/refined.length
+  });
+
+  return refined;
+}
+
+function supportTouchesSelectedPerson(supportMask,personMask,width,height){
+  const personBox=maskBounds(personMask,width,height,70);
+  const supportBox=maskBounds(supportMask,width,height,70);
+  if(!personBox||!supportBox)return false;
+
+  const padding=Math.round(Math.max(width,height)*.045);
+  if(!boxesNear(personBox,supportBox,padding))return false;
+
+  let supportPixels=0,nearPixels=0;
+  const radius=Math.max(2,Math.round(Math.max(width,height)*.012));
+  const personBinary=new Uint8Array(personMask.length);
+  for(let i=0;i<personMask.length;i++)personBinary[i]=personMask[i]>50?1:0;
+
+  for(let y=supportBox.minY;y<=supportBox.maxY;y++){
+    for(let x=supportBox.minX;x<=supportBox.maxX;x++){
+      const index=y*width+x;
+      if(supportMask[index]<70)continue;
+      supportPixels++;
+
+      let found=false;
+      for(let dy=-radius;dy<=radius&&!found;dy+=Math.max(1,Math.floor(radius/3))){
+        const py=y+dy;
+        if(py<0||py>=height)continue;
+        for(let dx=-radius;dx<=radius;dx+=Math.max(1,Math.floor(radius/3))){
+          const px=x+dx;
+          if(px<0||px>=width)continue;
+          if(personBinary[py*width+px]){
+            found=true;
+            break;
+          }
+        }
+      }
+      if(found)nearPixels++;
+    }
+  }
+
+  const contactRatio=nearPixels/Math.max(1,supportPixels);
+  const verticalOverlap=Math.min(personBox.maxY,supportBox.maxY)-
+    Math.max(personBox.minY,supportBox.minY);
+  const plausibleVertical=verticalOverlap>0;
+
+  return contactRatio>.012&&plausibleVertical;
+}
+
+async function createPanopticSubjectMasks(modnetMask,sourceUrl){
+  const segmenter=await ensurePanopticSegmenter();
+
+  setStatus("Detecting individual foreground objects…");
   const segments=await withTimeout(
     segmenter(sourceUrl),
-    240000,
-    "Support-object segmentation"
+    300000,
+    "Panoptic instance segmentation"
   );
 
-  if(!Array.isArray(segments)){
-    throw new Error("The support-object model returned no segments.");
+  if(!Array.isArray(segments)||!segments.length){
+    throw new Error("The panoptic model returned no object instances.");
   }
 
   const width=state.sourceBitmap.width;
   const height=state.sourceBitmap.height;
-  const merged=cloneMask(personMask);
-  const keptLabels=[];
-  const rejectedLabels=[];
+  const personCandidates=[];
+  const supportCandidates=[];
 
   for(const segment of segments){
     const label=normalizeLabel(segment?.label);
-    if(!label)continue;
+    if(!label||!segment?.mask)continue;
 
-    if(EXCLUDED_SCENE_LABELS.has(label)){
-      rejectedLabels.push(label);
-      continue;
+    if(label==="person"){
+      personCandidates.push({
+        label,
+        score:Number(segment.score||0),
+        mask:await rawMaskToFullResolution(segment.mask,width,height)
+      });
+    }else if(SUPPORT_LABELS.has(label)){
+      supportCandidates.push({
+        label,
+        score:Number(segment.score||0),
+        mask:await rawMaskToFullResolution(segment.mask,width,height)
+      });
     }
+  }
 
-    if(!SUPPORT_LABELS.has(label)){
-      continue;
-    }
+  if(!personCandidates.length){
+    throw new Error("No person instance was found by the panoptic model.");
+  }
 
-    const supportMask=await rawMaskToFullResolution(segment.mask,width,height);
-    const keep=supportTouchesPerson(supportMask,personMask,width,height);
+  // Select the person instance that overlaps the MODNet portrait matte most.
+  for(const candidate of personCandidates){
+    candidate.overlap=intersectionScore(modnetMask,candidate.mask);
+  }
+  personCandidates.sort((a,b)=>
+    (b.overlap-a.overlap)||
+    (b.score-a.score)
+  );
+
+  const selectedPerson=personCandidates[0];
+  const refinedPerson=constrainFinePersonMask(modnetMask,selectedPerson.mask);
+  const smart=cloneMask(refinedPerson);
+  const keptSupports=[];
+  const rejectedSupports=[];
+
+  for(const support of supportCandidates){
+    const keep=supportTouchesSelectedPerson(
+      support.mask,
+      selectedPerson.mask,
+      width,
+      height
+    );
 
     if(!keep){
-      rejectedLabels.push(label);
+      rejectedSupports.push(support.label);
       continue;
     }
 
-    keptLabels.push(label);
-    for(let i=0;i<merged.length;i++){
-      if(supportMask[i]>merged[i]){
-        merged[i]=supportMask[i];
+    keptSupports.push(support.label);
+    for(let i=0;i<smart.length;i++){
+      if(support.mask[i]>smart[i]){
+        smart[i]=support.mask[i];
       }
     }
   }
 
-  // Light feathering only on newly added semantic support edges.
-  const supportCanvas=document.createElement("canvas");
-  supportCanvas.width=width;
-  supportCanvas.height=height;
-  const supportCtx=supportCanvas.getContext("2d",{willReadFrequently:true});
-  const supportImage=supportCtx.createImageData(width,height);
-  for(let i=0,p=3;i<merged.length;i++,p+=4){
-    supportImage.data[p]=merged[i];
-  }
-  supportCtx.putImageData(supportImage,0,0);
-
-  const featherCanvas=document.createElement("canvas");
-  featherCanvas.width=width;
-  featherCanvas.height=height;
-  const featherCtx=featherCanvas.getContext("2d",{willReadFrequently:true});
-  featherCtx.filter="blur(0.7px)";
-  featherCtx.drawImage(supportCanvas,0,0);
-  featherCtx.filter="none";
-  const featherData=featherCtx.getImageData(0,0,width,height).data;
-
-  for(let i=0,p=3;i<merged.length;i++,p+=4){
-    merged[i]=Math.max(personMask[i],featherData[p]);
-  }
-
-  state.semanticLabels=keptLabels;
-
-  console.info("V5 semantic support diagnostics",{
-    keptLabels,
-    rejectedLabels:[...new Set(rejectedLabels)],
-    segmentCount:segments.length
+  console.info("V6 panoptic diagnostics",{
+    personInstances:personCandidates.length,
+    selectedPersonOverlap:selectedPerson.overlap,
+    selectedPersonScore:selectedPerson.score,
+    keptSupports,
+    rejectedSupports,
+    totalSegments:segments.length
   });
 
-  return merged;
+  return {
+    personMask:refinedPerson,
+    smartMask:smart,
+    keptSupports
+  };
 }
 
 async function applySubjectMode(mode){
@@ -453,16 +484,19 @@ async function applySubjectMode(mode){
 
   if(mode==="smart"&&!state.smartMask&&state.personMask&&state.sourceFile){
     try{
-      setBusy(true,"Detecting chairs and support objects…");
+      setBusy(true,"Detecting individual support objects…");
       const url=URL.createObjectURL(state.sourceFile);
       try{
-        state.smartMask=await createSemanticSupportMask(state.personMask,url);
+        const result=await createPanopticSubjectMasks(state.personMask,url);
+        state.personMask=result.personMask;
+        state.smartMask=result.smartMask;
+        state.semanticLabels=result.keptSupports;
       }finally{
         URL.revokeObjectURL(url);
       }
       setBusy(false,"Person + support selected");
     }catch(error){
-      setBusy(false,"Support-object detection failed");
+      setBusy(false,"Panoptic detection failed");
       showError(error);
       state.subjectMode="person";
     }
@@ -501,16 +535,16 @@ async function removeBackground(){
     setBusy(true,"Preparing local AI…");
     const url=URL.createObjectURL(state.sourceFile);
     try{
-      state.personMask=await buildAlphaMask(url);
+      const rawModnetMask=await buildAlphaMask(url);
+      setStatus("Selecting the real person instance…");
+      const panoptic=await createPanopticSubjectMasks(rawModnetMask,url);
 
-      if(state.subjectMode==="smart"){
-        setStatus("Detecting chairs and support objects…");
-        state.smartMask=await createSemanticSupportMask(state.personMask,url);
-        state.mask=cloneMask(state.smartMask);
-      }else{
-        state.smartMask=null;
-        state.mask=cloneMask(state.personMask);
-      }
+      state.personMask=panoptic.personMask;
+      state.smartMask=panoptic.smartMask;
+      state.semanticLabels=panoptic.keptSupports;
+      state.mask=state.subjectMode==="smart"
+        ? cloneMask(state.smartMask)
+        : cloneMask(state.personMask);
     }finally{
       URL.revokeObjectURL(url);
     }
