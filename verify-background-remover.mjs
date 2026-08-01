@@ -1,19 +1,18 @@
 const base=process.argv[2]||"https://online-scanner.pages.dev";
 
 const checks=[
-  [`${base}/background-remover?v=10.0.0`,[
-    "Processed locally · V10",
-    "app-v2.js?v=10.0.0",
-    "quantized MVANet"
+  [`${base}/background-remover?v=10.1.0`,[
+    "Processed locally · V10.1",
+    "app-v2.js?v=10.1.0",
+    "Person-only extraction"
   ]],
-  [`${base}/assets/js/background/app-v2.js?v=10.0.0`,[
-    "Background Remover V10 MVANet compatibility build loaded",
-    "onnx-community/MVANet-ONNX",
-    "\"background-removal\"",
-    "device:\"wasm\"",
-    "dtype:\"q8\"",
-    "V10 MVANet alpha diagnostics",
-    "MODNet fallback"
+  [`${base}/assets/js/background/app-v2.js?v=10.1.0`,[
+    "Background Remover V10.1 refinement build loaded",
+    "warmupPrimaryModel",
+    "keepLargestPersonComponent",
+    "V10.1 person-only cleanup diagnostics",
+    "support:\"skipped\"",
+    "V10.1 MVANet alpha diagnostics"
   ]]
 ];
 
@@ -38,4 +37,4 @@ for(const [url,expected] of checks){
 }
 
 if(failed)process.exitCode=1;
-else console.log("Background Remover V10 deployment verified.");
+else console.log("Background Remover V10.1 deployment verified.");

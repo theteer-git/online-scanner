@@ -1,0 +1,43 @@
+BACKGROUND REMOVER V10.1 — REFINEMENT AND PERFORMANCE
+
+Changes:
+- Person only is now the default extraction mode.
+- MVANet begins loading quietly after page startup.
+- Loaded models are reused across multiple images.
+- Person-only mode skips DETR Panoptic entirely.
+- Person-only cleanup keeps only the primary retained subject component.
+- Support-object AI runs only when Person + support is selected.
+- Status messages clearly identify the active processing stage.
+- Default edge cleanup values are tuned for cleaner output.
+
+Expected effect:
+- Faster common portrait workflow.
+- Fewer detached fragments in Person-only mode.
+- Lower memory and processing cost unless support-object extraction is requested.
+- No paid API, upload or user-image storage.
+
+DEPLOY
+
+1. Extract this ZIP.
+2. Copy all files into D:\cam and replace existing files.
+3. Keep D:\cam\.git unchanged.
+4. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Refine person extraction and defer support object AI"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=10.1.0
+
+Required marker:
+
+Processed locally · V10.1

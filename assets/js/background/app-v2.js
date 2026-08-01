@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V10 MVANet compatibility build loaded");
+console.info("Background Remover V10.1 refinement build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -13,7 +13,7 @@ const els={
 
 const ctx=els.canvas.getContext("2d");
 const state={
-  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,AutoModel:null,AutoProcessor:null,pipelineFactory:null,panopticSegmenter:null,mvanetSegmenter:null,professionalBackend:null,semanticLabels:[],bgBitmap:null,
+  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"person",model:null,processor:null,RawImage:null,AutoModel:null,AutoProcessor:null,pipelineFactory:null,panopticSegmenter:null,mvanetSegmenter:null,professionalBackend:null,semanticLabels:[],bgBitmap:null,
   background:"transparent",mode:"move",subjectX:0,subjectY:0,subjectScale:1,
   dragging:false,lastPointer:null,painting:false,history:[],future:[],busy:false,showOriginal:false
 };
@@ -137,13 +137,39 @@ async function ensureModel(){
   state.RawImage=RawImage;
   els.progress.value=100;
   setStatus("Model ready");
-  els.remove.textContent="Remove background";
+  if(state.sourceFile)els.remove.textContent="Remove background";
   setTimeout(()=>els.progress.classList.add("hidden"),600);
 
   return {model:state.model,processor:state.processor,RawImage:state.RawImage};
 }
 
 
+
+
+async function warmupPrimaryModel(){
+  if(state.warmupStarted||state.mvanetSegmenter)return;
+  state.warmupStarted=true;
+
+  try{
+    await new Promise(resolve=>{
+      if("requestIdleCallback" in window){
+        requestIdleCallback(()=>resolve(),{timeout:2500});
+      }else{
+        setTimeout(resolve,1200);
+      }
+    });
+
+    if(document.visibilityState!=="visible")return;
+
+    setStatus("Preparing local AI in the background…");
+    await ensureMVANetSegmenter();
+    state.warmupComplete=true;
+    setStatus("Local AI ready");
+  }catch(error){
+    console.info("V10.1 background warmup skipped",error);
+    setStatus("Image ready");
+  }
+}
 
 async function ensureMVANetSegmenter(){
   if(state.mvanetSegmenter){
@@ -155,7 +181,7 @@ async function ensureMVANetSegmenter(){
   els.progress.classList.remove("hidden");
   els.progress.removeAttribute("value");
   setStatus("Preparing compatible professional model…");
-  els.remove.textContent="Loading MVANet…";
+  if(state.sourceFile)els.remove.textContent="Loading MVANet…";
 
   const progress_callback=event=>{
     if(event?.progress!=null){
@@ -275,7 +301,7 @@ async function buildMVANetMask(sourceUrl){
     if(alpha>8)foreground++;
   }
 
-  console.info("V10 MVANet alpha diagnostics",{
+  console.info("V10.1 MVANet alpha diagnostics",{
     backend:state.professionalBackend,
     sourceSize:[result.width,result.height],
     outputSize:[state.sourceBitmap.width,state.sourceBitmap.height],
@@ -930,6 +956,91 @@ function refineProfessionalMatte(finePersonMask,combinedMask,panopticPersonMask,
   return feathered;
 }
 
+
+function keepLargestPersonComponent(mask,personInstanceMask,width,height){
+  const candidate=new Uint8Array(mask.length);
+  const personSeed=new Uint8Array(personInstanceMask.length);
+
+  for(let i=0;i<candidate.length;i++){
+    candidate[i]=mask[i]>22?1:0;
+    personSeed[i]=personInstanceMask[i]>55?1:0;
+  }
+
+  const visited=new Uint8Array(candidate.length);
+  const queue=new Int32Array(candidate.length);
+  const components=[];
+  let largestSeeded=null;
+
+  for(let start=0;start<candidate.length;start++){
+    if(!candidate[start]||visited[start])continue;
+
+    let head=0,tail=0,seedOverlap=0;
+    const indices=[];
+    queue[tail++]=start;
+    visited[start]=1;
+
+    while(head<tail){
+      const current=queue[head++];
+      indices.push(current);
+      if(personSeed[current])seedOverlap++;
+
+      const x=current%width;
+      const y=Math.floor(current/width);
+      const neighbours=[
+        x>0?current-1:-1,
+        x<width-1?current+1:-1,
+        y>0?current-width:-1,
+        y<height-1?current+width:-1,
+        x>0&&y>0?current-width-1:-1,
+        x<width-1&&y>0?current-width+1:-1,
+        x>0&&y<height-1?current+width-1:-1,
+        x<width-1&&y<height-1?current+width+1:-1
+      ];
+
+      for(const next of neighbours){
+        if(next<0||!candidate[next]||visited[next])continue;
+        visited[next]=1;
+        queue[tail++]=next;
+      }
+    }
+
+    const component={indices,seedOverlap};
+    components.push(component);
+
+    if(seedOverlap>0&&(!largestSeeded||indices.length>largestSeeded.indices.length)){
+      largestSeeded=component;
+    }
+  }
+
+  const output=new Uint8ClampedArray(mask.length);
+
+  if(largestSeeded){
+    for(const index of largestSeeded.indices){
+      output[index]=mask[index];
+    }
+  }else{
+    // Fallback: keep the largest component if no overlap exists.
+    components.sort((a,b)=>b.indices.length-a.indices.length);
+    const largest=components[0];
+    if(largest){
+      for(const index of largest.indices){
+        output[index]=mask[index];
+      }
+    }
+  }
+
+  console.info("V10.1 person-only cleanup diagnostics",{
+    componentCount:components.length,
+    keptPixels:largestSeeded?.indices.length||components[0]?.indices.length||0
+  });
+
+  return featherMatte(
+    fillSmallInternalHoles(output,width,height),
+    width,
+    height
+  );
+}
+
 async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
   const segmenter=await ensurePanopticSegmenter();
 
@@ -1018,15 +1129,14 @@ async function createPanopticSubjectMasks(primaryFineMask,sourceUrl){
 
   // Person-only mode receives fragment cleanup and subtle feathering while
   // retaining MODNet's fine portrait detail.
-  const professionalPerson=refineProfessionalMatte(
-    refinedPerson,
+  const professionalPerson=keepLargestPersonComponent(
     refinedPerson,
     selectedPerson.mask,
     width,
     height
   );
 
-  console.info("V10 MVANet + panoptic diagnostics",{
+  console.info("V10.1 MVANet + panoptic diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -1103,20 +1213,39 @@ async function removeBackground(){
     const url=URL.createObjectURL(state.sourceFile);
     try{
       const primary=await buildProfessionalOrFallbackMask(url);
-      setStatus("Selecting the real person and support instances…");
-      const panoptic=await createPanopticSubjectMasks(primary.mask,url);
-      console.info("V10 extraction backend",{
-        primary:primary.backend,
-        support:"DETR Panoptic",
-        cleanup:"person-anchored"
-      });
 
-      state.personMask=panoptic.personMask;
-      state.smartMask=panoptic.smartMask;
-      state.semanticLabels=panoptic.keptSupports;
-      state.mask=state.subjectMode==="smart"
-        ? cloneMask(state.smartMask)
-        : cloneMask(state.personMask);
+      if(state.subjectMode==="smart"){
+        setStatus("Selecting the real person and support instances…");
+        const panoptic=await createPanopticSubjectMasks(primary.mask,url);
+
+        state.personMask=panoptic.personMask;
+        state.smartMask=panoptic.smartMask;
+        state.semanticLabels=panoptic.keptSupports;
+        state.mask=cloneMask(state.smartMask);
+
+        console.info("V10.1 extraction backend",{
+          primary:primary.backend,
+          support:"DETR Panoptic",
+          cleanup:"person-anchored"
+        });
+      }else{
+        setStatus("Cleaning the person matte…");
+        state.personMask=keepLargestPersonComponent(
+          primary.mask,
+          primary.mask,
+          state.sourceBitmap.width,
+          state.sourceBitmap.height
+        );
+        state.smartMask=null;
+        state.semanticLabels=[];
+        state.mask=cloneMask(state.personMask);
+
+        console.info("V10.1 extraction backend",{
+          primary:primary.backend,
+          support:"skipped",
+          cleanup:"largest-person-component"
+        });
+      }
     }finally{
       URL.revokeObjectURL(url);
     }
@@ -1130,8 +1259,8 @@ async function removeBackground(){
     render();
 
     els.progress.value=100;
-    els.remove.textContent="Background removed";
-    setBusy(false,"Background removed");
+    els.remove.textContent=state.subjectMode==="smart"?"Support extracted":"Person extracted";
+    setBusy(false,state.subjectMode==="smart"?"Person + support ready":"Person ready");
 
     setTimeout(()=>{
       els.remove.textContent="Remove again";
@@ -1328,3 +1457,5 @@ els.viewport.addEventListener("pointerdown",event=>{
 els.viewport.addEventListener("pointerleave",()=>els.brushCursor.classList.add("hidden"));
 els.viewport.addEventListener("pointerenter",()=>{if(state.mode!=="move")els.brushCursor.classList.remove("hidden")});
 window.addEventListener("beforeunload",()=>{state.sourceBitmap?.close?.();state.bgBitmap?.close?.()});
+
+window.addEventListener("load",()=>warmupPrimaryModel());
