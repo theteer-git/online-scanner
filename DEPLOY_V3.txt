@@ -1,0 +1,17 @@
+BACKGROUND REMOVER V3 — DIRECT MODNET
+
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Delete D:\cam\_redirects if present.
+3. Keep D:\cam\.git unchanged.
+
+Run:
+cd /d D:\cam
+git add -A
+git commit -m "Replace background engine with direct MODNet alpha matte"
+git push
+
+After Cloudflare deployment:
+node verify-background-remover.mjs
+
+Open:
+https://online-scanner.pages.dev/background-remover?v=3.0.0

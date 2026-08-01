@@ -7,14 +7,4 @@
 
 /background-remover
   Cache-Control: no-store, no-cache, must-revalidate
-  X-Background-Remover-Build: v2.1
-
-/background-remover.html
-  Cache-Control: no-store, no-cache, must-revalidate
-  X-Background-Remover-Build: v2.1
-
-/assets/js/background/*
-  Cache-Control: public, max-age=300, must-revalidate
-
-/assets/css/background-remover-v2.css
-  Cache-Control: public, max-age=300, must-revalidate
+  X-Background-Remover-Build: v3
