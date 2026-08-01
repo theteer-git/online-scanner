@@ -1,0 +1,40 @@
+BACKGROUND REMOVER V7 — PROFESSIONAL MATTE REFINEMENT
+
+V7 retains the successful V6 detector architecture:
+
+1. MODNet fine portrait matte.
+2. DETR Panoptic person and support-object instances.
+
+V7 adds a deterministic refinement stage:
+
+- removes floating fragments not anchored to the selected person;
+- repairs narrow gaps in chair/support masks;
+- fills small internal holes;
+- preserves the MODNet person detail;
+- softly feathers only the final edge band;
+- retains manual Erase and Restore controls.
+
+DEPLOY
+
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Add professional matte cleanup and fragment removal"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=7.0.0
+
+The header must show:
+
+Processed locally · V7

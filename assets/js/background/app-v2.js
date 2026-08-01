@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V6 panoptic-instance build loaded");
+console.info("Background Remover V7 matte-refinement build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -381,6 +381,313 @@ function supportTouchesSelectedPerson(supportMask,personMask,width,height){
   return contactRatio>.012&&plausibleVertical;
 }
 
+
+function maskToAlphaCanvas(mask,width,height){
+  const canvas=document.createElement("canvas");
+  canvas.width=width;
+  canvas.height=height;
+  const context=canvas.getContext("2d",{willReadFrequently:true});
+  const image=context.createImageData(width,height);
+
+  for(let i=0,p=3;i<mask.length;i++,p+=4){
+    image.data[p]=mask[i];
+  }
+
+  context.putImageData(image,0,0);
+  return canvas;
+}
+
+function alphaCanvasToMask(canvas){
+  const context=canvas.getContext("2d",{willReadFrequently:true});
+  const data=context.getImageData(0,0,canvas.width,canvas.height).data;
+  const mask=new Uint8ClampedArray(canvas.width*canvas.height);
+
+  for(let i=0,p=3;i<mask.length;i++,p+=4){
+    mask[i]=data[p];
+  }
+
+  return mask;
+}
+
+function morphologyClose(mask,width,height,radius){
+  if(radius<=0)return cloneMask(mask);
+
+  const source=maskToAlphaCanvas(mask,width,height);
+  const expanded=document.createElement("canvas");
+  expanded.width=width;
+  expanded.height=height;
+  const expandedContext=expanded.getContext("2d");
+
+  // Maximum-like expansion by drawing the mask around its original position.
+  for(let y=-radius;y<=radius;y++){
+    for(let x=-radius;x<=radius;x++){
+      if(x*x+y*y>radius*radius)continue;
+      expandedContext.drawImage(source,x,y);
+    }
+  }
+
+  const expandedMask=alphaCanvasToMask(expanded);
+  const result=new Uint8ClampedArray(expandedMask.length);
+
+  // Erode the expanded result. A pixel remains only when the neighbourhood
+  // is substantially occupied. This closes narrow gaps without broad growth.
+  for(let y=0;y<height;y++){
+    for(let x=0;x<width;x++){
+      let occupied=0,total=0,minimum=255;
+
+      for(let dy=-radius;dy<=radius;dy++){
+        const py=y+dy;
+        if(py<0||py>=height)continue;
+
+        for(let dx=-radius;dx<=radius;dx++){
+          if(dx*dx+dy*dy>radius*radius)continue;
+          const px=x+dx;
+          if(px<0||px>=width)continue;
+
+          const value=expandedMask[py*width+px];
+          total++;
+          if(value>18)occupied++;
+          if(value<minimum)minimum=value;
+        }
+      }
+
+      const index=y*width+x;
+      result[index]=occupied>=Math.max(1,Math.round(total*.72))
+        ? Math.max(mask[index],minimum)
+        : mask[index];
+    }
+  }
+
+  return result;
+}
+
+function componentFilterAnchoredToPerson(combinedMask,personMask,width,height){
+  const binary=new Uint8Array(combinedMask.length);
+  const personBinary=new Uint8Array(personMask.length);
+
+  for(let i=0;i<binary.length;i++){
+    binary[i]=combinedMask[i]>28?1:0;
+    personBinary[i]=personMask[i]>55?1:0;
+  }
+
+  const visited=new Uint8Array(binary.length);
+  const output=new Uint8ClampedArray(combinedMask.length);
+  const queue=new Int32Array(binary.length);
+  const component=[];
+  const minimumArea=Math.max(20,Math.round(width*height*.000035));
+  const generousArea=Math.max(minimumArea,Math.round(width*height*.004));
+
+  let componentCount=0;
+  let keptCount=0;
+  let removedPixels=0;
+
+  for(let start=0;start<binary.length;start++){
+    if(!binary[start]||visited[start])continue;
+
+    component.length=0;
+    let head=0,tail=0;
+    let personOverlap=0;
+    let maxAlpha=0;
+
+    queue[tail++]=start;
+    visited[start]=1;
+
+    while(head<tail){
+      const current=queue[head++];
+      component.push(current);
+      if(personBinary[current])personOverlap++;
+      if(combinedMask[current]>maxAlpha)maxAlpha=combinedMask[current];
+
+      const x=current%width;
+      const y=Math.floor(current/width);
+
+      const neighbours=[
+        [x-1,y],[x+1,y],[x,y-1],[x,y+1],
+        [x-1,y-1],[x+1,y-1],[x-1,y+1],[x+1,y+1]
+      ];
+
+      for(const [nx,ny] of neighbours){
+        if(nx<0||nx>=width||ny<0||ny>=height)continue;
+        const next=ny*width+nx;
+        if(!binary[next]||visited[next])continue;
+        visited[next]=1;
+        queue[tail++]=next;
+      }
+    }
+
+    componentCount++;
+
+    const area=component.length;
+    const overlapRatio=personOverlap/Math.max(1,area);
+    const anchored=personOverlap>0;
+    const substantialSupport=area>=generousArea&&overlapRatio>.002;
+    const keep=(anchored||substantialSupport)&&area>=minimumArea&&maxAlpha>35;
+
+    if(keep){
+      keptCount++;
+      for(const index of component){
+        output[index]=combinedMask[index];
+      }
+    }else{
+      removedPixels+=area;
+    }
+  }
+
+  console.info("V7 component cleanup diagnostics",{
+    componentCount,
+    keptCount,
+    removedPixels,
+    removedRatio:removedPixels/output.length
+  });
+
+  return output;
+}
+
+function fillSmallInternalHoles(mask,width,height){
+  const solid=new Uint8Array(mask.length);
+  for(let i=0;i<solid.length;i++)solid[i]=mask[i]>45?1:0;
+
+  const exterior=new Uint8Array(mask.length);
+  const queue=new Int32Array(mask.length);
+  let head=0,tail=0;
+
+  const enqueue=(index)=>{
+    if(index<0||index>=solid.length||solid[index]||exterior[index])return;
+    exterior[index]=1;
+    queue[tail++]=index;
+  };
+
+  for(let x=0;x<width;x++){
+    enqueue(x);
+    enqueue((height-1)*width+x);
+  }
+  for(let y=0;y<height;y++){
+    enqueue(y*width);
+    enqueue(y*width+width-1);
+  }
+
+  while(head<tail){
+    const current=queue[head++];
+    const x=current%width;
+    const y=Math.floor(current/width);
+
+    if(x>0)enqueue(current-1);
+    if(x<width-1)enqueue(current+1);
+    if(y>0)enqueue(current-width);
+    if(y<height-1)enqueue(current+width);
+  }
+
+  const visited=new Uint8Array(mask.length);
+  const holeQueue=new Int32Array(mask.length);
+  const hole=[];
+  const maxHoleArea=Math.max(80,Math.round(width*height*.0014));
+  let filledPixels=0;
+
+  for(let start=0;start<mask.length;start++){
+    if(solid[start]||exterior[start]||visited[start])continue;
+
+    hole.length=0;
+    let holeHead=0,holeTail=0;
+    holeQueue[holeTail++]=start;
+    visited[start]=1;
+
+    while(holeHead<holeTail){
+      const current=holeQueue[holeHead++];
+      hole.push(current);
+      const x=current%width;
+      const y=Math.floor(current/width);
+
+      const neighbours=[
+        x>0?current-1:-1,
+        x<width-1?current+1:-1,
+        y>0?current-width:-1,
+        y<height-1?current+width:-1
+      ];
+
+      for(const next of neighbours){
+        if(next<0||solid[next]||exterior[next]||visited[next])continue;
+        visited[next]=1;
+        holeQueue[holeTail++]=next;
+      }
+    }
+
+    if(hole.length<=maxHoleArea){
+      for(const index of hole){
+        mask[index]=255;
+      }
+      filledPixels+=hole.length;
+    }
+  }
+
+  console.info("V7 hole repair diagnostics",{
+    filledPixels,
+    maximumHoleArea:maxHoleArea
+  });
+
+  return mask;
+}
+
+function featherMatte(mask,width,height){
+  const source=maskToAlphaCanvas(mask,width,height);
+  const blurred=document.createElement("canvas");
+  blurred.width=width;
+  blurred.height=height;
+  const context=blurred.getContext("2d",{willReadFrequently:true});
+
+  const radius=Math.max(.45,Math.min(1.25,Math.max(width,height)/1800));
+  context.filter=`blur(${radius}px)`;
+  context.drawImage(source,0,0);
+  context.filter="none";
+
+  const softened=alphaCanvasToMask(blurred);
+  const result=new Uint8ClampedArray(mask.length);
+
+  for(let i=0;i<result.length;i++){
+    const original=mask[i];
+    const soft=softened[i];
+
+    // Preserve confident interiors and exteriors. Blend only the edge band.
+    if(original>=242)result[i]=255;
+    else if(original<=8&&soft<=8)result[i]=0;
+    else result[i]=Math.round(original*.58+soft*.42);
+  }
+
+  return result;
+}
+
+function refineProfessionalMatte(personMask,combinedMask,width,height){
+  const repairRadius=Math.max(1,Math.min(4,Math.round(Math.max(width,height)*.0022)));
+
+  // Person detail is preserved separately. Morphological repair is applied to
+  // the combined support mask, then false disconnected components are removed.
+  const closed=morphologyClose(combinedMask,width,height,repairRadius);
+  for(let i=0;i<closed.length;i++){
+    closed[i]=Math.max(closed[i],personMask[i]);
+  }
+
+  const anchored=componentFilterAnchoredToPerson(
+    closed,
+    personMask,
+    width,
+    height
+  );
+
+  for(let i=0;i<anchored.length;i++){
+    anchored[i]=Math.max(anchored[i],personMask[i]);
+  }
+
+  const filled=fillSmallInternalHoles(anchored,width,height);
+  const feathered=featherMatte(filled,width,height);
+
+  console.info("V7 matte refinement diagnostics",{
+    repairRadius,
+    width,
+    height
+  });
+
+  return feathered;
+}
+
 async function createPanopticSubjectMasks(modnetMask,sourceUrl){
   const segmenter=await ensurePanopticSegmenter();
 
@@ -459,7 +766,27 @@ async function createPanopticSubjectMasks(modnetMask,sourceUrl){
     }
   }
 
-  console.info("V6 panoptic diagnostics",{
+  const professionalSmart=refineProfessionalMatte(
+    refinedPerson,
+    smart,
+    width,
+    height
+  );
+
+  // Person-only mode receives fragment cleanup and subtle feathering while
+  // retaining MODNet's fine portrait detail.
+  const professionalPerson=featherMatte(
+    componentFilterAnchoredToPerson(
+      refinedPerson,
+      refinedPerson,
+      width,
+      height
+    ),
+    width,
+    height
+  );
+
+  console.info("V7 panoptic + matting diagnostics",{
     personInstances:personCandidates.length,
     selectedPersonOverlap:selectedPerson.overlap,
     selectedPersonScore:selectedPerson.score,
@@ -469,8 +796,8 @@ async function createPanopticSubjectMasks(modnetMask,sourceUrl){
   });
 
   return {
-    personMask:refinedPerson,
-    smartMask:smart,
+    personMask:professionalPerson,
+    smartMask:professionalSmart,
     keptSupports
   };
 }
