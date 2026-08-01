@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V4 smart-subject build loaded");
+console.info("Background Remover V5 semantic-support build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -13,7 +13,7 @@ const els={
 
 const ctx=els.canvas.getContext("2d");
 const state={
-  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,bgBitmap:null,
+  sourceFile:null,sourceBitmap:null,mask:null,personMask:null,smartMask:null,subjectMode:"smart",model:null,processor:null,RawImage:null,pipelineFactory:null,semanticSegmenter:null,semanticLabels:[],bgBitmap:null,
   background:"transparent",mode:"move",subjectX:0,subjectY:0,subjectScale:1,
   dragging:false,lastPointer:null,painting:false,history:[],future:[],busy:false,showOriginal:false
 };
@@ -58,7 +58,7 @@ async function loadImage(file){
   state.sourceBitmap?.close?.();
   state.sourceFile=file;
   state.sourceBitmap=await createImageBitmap(file);
-  state.mask=null;state.history=[];state.future=[];
+  state.mask=null;state.personMask=null;state.smartMask=null;state.semanticLabels=[];state.history=[];state.future=[];
   state.subjectX=0;state.subjectY=0;state.subjectScale=1;els.scale.value=100;
   els.welcome.classList.add("hidden");els.workspace.classList.remove("hidden");
   resizeOutput(state.sourceBitmap.width,state.sourceBitmap.height);
@@ -83,7 +83,8 @@ async function ensureModel(){
     "Transformers.js download"
   );
 
-  const {AutoModel,AutoProcessor,RawImage,env}=transformers;
+  const {AutoModel,AutoProcessor,RawImage,pipeline,env}=transformers;
+  state.pipelineFactory=pipeline;
   env.allowLocalModels=false;
   env.useBrowserCache=true;
 
@@ -180,186 +181,306 @@ async function buildAlphaMask(sourceUrl){
 }
 
 
-function median(values){
-  if(!values.length)return 0;
-  values.sort((a,b)=>a-b);
-  return values[Math.floor(values.length/2)];
+
+const SUPPORT_LABELS=new Set([
+  "chair",
+  "armchair",
+  "swivel chair",
+  "stool",
+  "seat",
+  "bench",
+  "sofa",
+  "couch",
+  "wheelchair"
+]);
+
+const EXCLUDED_SCENE_LABELS=new Set([
+  "wall",
+  "floor",
+  "ceiling",
+  "curtain",
+  "windowpane",
+  "window",
+  "door",
+  "building",
+  "road",
+  "sidewalk",
+  "earth",
+  "grass",
+  "plant",
+  "tree",
+  "sky",
+  "bed",
+  "table",
+  "desk",
+  "cabinet",
+  "shelf",
+  "rug",
+  "carpet"
+]);
+
+async function ensureSemanticSegmenter(){
+  if(state.semanticSegmenter)return state.semanticSegmenter;
+
+  if(!state.pipelineFactory){
+    await ensureModel();
+  }
+
+  setStatus("Loading support-object model…");
+  els.progress.classList.remove("hidden");
+  els.progress.removeAttribute("value");
+
+  const progress_callback=event=>{
+    if(event?.progress!=null){
+      const progress=Math.max(1,Math.min(99,Math.round(event.progress)));
+      els.progress.value=progress;
+      setStatus(`Downloading support-object model… ${progress}%`);
+    }else if(event?.status){
+      setStatus(`Support model: ${event.status}`);
+    }
+  };
+
+  state.semanticSegmenter=await withTimeout(
+    state.pipelineFactory(
+      "image-segmentation",
+      "Xenova/segformer-b0-finetuned-ade-512-512",
+      {
+        device:"wasm",
+        dtype:"q8",
+        progress_callback
+      }
+    ),
+    300000,
+    "Support-object model download"
+  );
+
+  return state.semanticSegmenter;
 }
 
-function createSmartSubjectMask(personMask){
-  if(!state.sourceBitmap||!personMask)return personMask;
+function normalizeLabel(label){
+  return String(label||"")
+    .toLowerCase()
+    .replace(/[_-]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
 
-  const sourceWidth=state.sourceBitmap.width;
-  const sourceHeight=state.sourceBitmap.height;
-  const maxSide=480;
-  const scale=Math.min(1,maxSide/Math.max(sourceWidth,sourceHeight));
-  const width=Math.max(1,Math.round(sourceWidth*scale));
-  const height=Math.max(1,Math.round(sourceHeight*scale));
-
-  const imageCanvas=document.createElement("canvas");
-  imageCanvas.width=width;
-  imageCanvas.height=height;
-  const imageCtx=imageCanvas.getContext("2d",{willReadFrequently:true});
-  imageCtx.drawImage(state.sourceBitmap,0,0,width,height);
-  const pixels=imageCtx.getImageData(0,0,width,height).data;
-
-  const maskCanvas=document.createElement("canvas");
-  maskCanvas.width=sourceWidth;
-  maskCanvas.height=sourceHeight;
-  const maskCtx=maskCanvas.getContext("2d");
-  const maskImage=maskCtx.createImageData(sourceWidth,sourceHeight);
-  for(let i=0,p=3;i<personMask.length;i++,p+=4){
-    maskImage.data[p]=personMask[i];
-  }
-  maskCtx.putImageData(maskImage,0,0);
-
-  const smallMaskCanvas=document.createElement("canvas");
-  smallMaskCanvas.width=width;
-  smallMaskCanvas.height=height;
-  const smallMaskCtx=smallMaskCanvas.getContext("2d",{willReadFrequently:true});
-  smallMaskCtx.imageSmoothingEnabled=true;
-  smallMaskCtx.drawImage(maskCanvas,0,0,width,height);
-  const smallMaskRGBA=smallMaskCtx.getImageData(0,0,width,height).data;
-  const smallPerson=new Uint8ClampedArray(width*height);
-  for(let i=0,p=3;i<smallPerson.length;i++,p+=4)smallPerson[i]=smallMaskRGBA[p];
-
-  // Estimate the dominant background colour from the image border.
-  const borderR=[],borderG=[],borderB=[];
-  const borderStep=Math.max(1,Math.floor(Math.min(width,height)/80));
-  const addBorder=(x,y)=>{
-    const p=(y*width+x)*4;
-    borderR.push(pixels[p]);borderG.push(pixels[p+1]);borderB.push(pixels[p+2]);
-  };
-  for(let x=0;x<width;x+=borderStep){addBorder(x,0);addBorder(x,height-1)}
-  for(let y=0;y<height;y+=borderStep){addBorder(0,y);addBorder(width-1,y)}
-  const bgR=median(borderR),bgG=median(borderG),bgB=median(borderB);
-
-  // Person bounding box.
-  let minX=width,minY=height,maxX=0,maxY=0,seedCount=0;
-  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-    const i=y*width+x;
-    if(smallPerson[i]>150){
+function maskBoundingBox(mask,width,height,threshold=90){
+  let minX=width,minY=height,maxX=-1,maxY=-1,count=0;
+  for(let y=0;y<height;y++){
+    const row=y*width;
+    for(let x=0;x<width;x++){
+      if(mask[row+x]<threshold)continue;
       if(x<minX)minX=x;if(x>maxX)maxX=x;
       if(y<minY)minY=y;if(y>maxY)maxY=y;
-      seedCount++;
+      count++;
     }
   }
-  if(!seedCount)return personMask;
+  return count?{minX,minY,maxX,maxY,count}:null;
+}
 
-  const boxW=Math.max(1,maxX-minX+1),boxH=Math.max(1,maxY-minY+1);
-  const marginX=Math.round(boxW*.35);
-  const marginTop=Math.round(boxH*.14);
-  const marginBottom=Math.round(boxH*.38);
-  minX=Math.max(0,minX-marginX);
-  maxX=Math.min(width-1,maxX+marginX);
-  minY=Math.max(0,minY-marginTop);
-  maxY=Math.min(height-1,maxY+marginBottom);
+function boxesIntersect(a,b,padding=0){
+  if(!a||!b)return false;
+  return !(
+    a.maxX+padding<b.minX ||
+    b.maxX+padding<a.minX ||
+    a.maxY+padding<b.minY ||
+    b.maxY+padding<a.minY
+  );
+}
 
-  const candidate=new Uint8Array(width*height);
-  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
-    const i=y*width+x,p=i*4;
-    const dr=pixels[p]-bgR,dg=pixels[p+1]-bgG,db=pixels[p+2]-bgB;
-    const backgroundDistance=Math.sqrt(dr*dr+dg*dg+db*db);
+function createDilatedBinaryMask(mask,width,height,radius){
+  const sourceCanvas=document.createElement("canvas");
+  sourceCanvas.width=width;
+  sourceCanvas.height=height;
+  const sourceCtx=sourceCanvas.getContext("2d");
+  const image=sourceCtx.createImageData(width,height);
+  for(let i=0,p=3;i<mask.length;i++,p+=4){
+    image.data[p]=mask[i]>70?255:0;
+  }
+  sourceCtx.putImageData(image,0,0);
 
-    const maxChannel=Math.max(pixels[p],pixels[p+1],pixels[p+2]);
-    const minChannel=Math.min(pixels[p],pixels[p+1],pixels[p+2]);
-    const chroma=maxChannel-minChannel;
+  const dilated=document.createElement("canvas");
+  dilated.width=width;
+  dilated.height=height;
+  const dctx=dilated.getContext("2d",{willReadFrequently:true});
+  dctx.filter=`blur(${Math.max(1,radius/2)}px)`;
+  dctx.drawImage(sourceCanvas,0,0);
+  dctx.filter="none";
+  const data=dctx.getImageData(0,0,width,height).data;
+  const out=new Uint8Array(width*height);
+  for(let i=0,p=3;i<out.length;i++,p+=4){
+    out[i]=data[p]>4?1:0;
+  }
+  return out;
+}
 
-    // Strong MODNet pixels always remain candidates.
-    // Other pixels must be visually different from the border background.
-    if(smallPerson[i]>18 || backgroundDistance>52 || chroma>58){
-      candidate[i]=1;
+async function rawMaskToFullResolution(rawMask,width,height){
+  if(!rawMask?.resize||!rawMask?.data){
+    throw new Error("The semantic model returned an unsupported mask.");
+  }
+
+  const resized=await rawMask.resize(width,height);
+  const expected=width*height;
+  const channels=Math.max(1,Math.round(resized.data.length/expected));
+  const output=new Uint8ClampedArray(expected);
+
+  for(let i=0;i<expected;i++){
+    output[i]=resized.data[i*channels];
+  }
+  return output;
+}
+
+function supportTouchesPerson(supportMask,personMask,width,height){
+  const personBox=maskBoundingBox(personMask,width,height,80);
+  const supportBox=maskBoundingBox(supportMask,width,height,80);
+  if(!personBox||!supportBox)return false;
+
+  const padding=Math.round(Math.max(width,height)*.035);
+  if(!boxesIntersect(personBox,supportBox,padding))return false;
+
+  const dilated=createDilatedBinaryMask(personMask,width,height,padding);
+  let supportPixels=0,touchingPixels=0;
+
+  for(let i=0;i<supportMask.length;i++){
+    if(supportMask[i]<80)continue;
+    supportPixels++;
+    if(dilated[i])touchingPixels++;
+  }
+
+  if(!supportPixels)return false;
+
+  const contactRatio=touchingPixels/supportPixels;
+  const supportCenterY=(supportBox.minY+supportBox.maxY)/2;
+  const personCenterY=(personBox.minY+personBox.maxY)/2;
+  const verticallyPlausible=supportCenterY>personBox.minY &&
+    supportBox.minY<personBox.maxY &&
+    supportCenterY>personCenterY*.72;
+
+  return contactRatio>.018 && verticallyPlausible;
+}
+
+async function createSemanticSupportMask(personMask,sourceUrl){
+  const segmenter=await ensureSemanticSegmenter();
+
+  setStatus("Classifying support objects…");
+  const segments=await withTimeout(
+    segmenter(sourceUrl),
+    240000,
+    "Support-object segmentation"
+  );
+
+  if(!Array.isArray(segments)){
+    throw new Error("The support-object model returned no segments.");
+  }
+
+  const width=state.sourceBitmap.width;
+  const height=state.sourceBitmap.height;
+  const merged=cloneMask(personMask);
+  const keptLabels=[];
+  const rejectedLabels=[];
+
+  for(const segment of segments){
+    const label=normalizeLabel(segment?.label);
+    if(!label)continue;
+
+    if(EXCLUDED_SCENE_LABELS.has(label)){
+      rejectedLabels.push(label);
+      continue;
+    }
+
+    if(!SUPPORT_LABELS.has(label)){
+      continue;
+    }
+
+    const supportMask=await rawMaskToFullResolution(segment.mask,width,height);
+    const keep=supportTouchesPerson(supportMask,personMask,width,height);
+
+    if(!keep){
+      rejectedLabels.push(label);
+      continue;
+    }
+
+    keptLabels.push(label);
+    for(let i=0;i<merged.length;i++){
+      if(supportMask[i]>merged[i]){
+        merged[i]=supportMask[i];
+      }
     }
   }
 
-  // Flood-fill only candidate pixels connected to the person.
-  const kept=new Uint8Array(width*height);
-  const queue=new Int32Array(width*height);
-  let head=0,tail=0;
-
-  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
-    const i=y*width+x;
-    if(smallPerson[i]>145){
-      kept[i]=1;
-      queue[tail++]=i;
-    }
-  }
-
-  const neighbours=[-1,1,-width,width];
-  while(head<tail){
-    const current=queue[head++];
-    const x=current%width;
-    for(const delta of neighbours){
-      const next=current+delta;
-      if(next<0||next>=kept.length||kept[next]||!candidate[next])continue;
-      const nx=next%width;
-      if(Math.abs(nx-x)>1)continue;
-      const ny=Math.floor(next/width);
-      if(nx<minX||nx>maxX||ny<minY||ny>maxY)continue;
-
-      // Prevent very distant expansion into the upper background.
-      const nearPerson=smallPerson[next]>5;
-      const lowerSupport=ny>minY+boxH*.32;
-      if(!nearPerson&&!lowerSupport)continue;
-
-      kept[next]=1;
-      queue[tail++]=next;
-    }
-  }
-
-  // Remove tiny isolated growth and retain a softly expanded connected mask.
+  // Light feathering only on newly added semantic support edges.
   const supportCanvas=document.createElement("canvas");
   supportCanvas.width=width;
   supportCanvas.height=height;
-  const supportCtx=supportCanvas.getContext("2d");
+  const supportCtx=supportCanvas.getContext("2d",{willReadFrequently:true});
   const supportImage=supportCtx.createImageData(width,height);
-  for(let i=0,p=3;i<kept.length;i++,p+=4){
-    supportImage.data[p]=kept[i]?255:0;
+  for(let i=0,p=3;i<merged.length;i++,p+=4){
+    supportImage.data[p]=merged[i];
   }
   supportCtx.putImageData(supportImage,0,0);
 
-  const fullCanvas=document.createElement("canvas");
-  fullCanvas.width=sourceWidth;
-  fullCanvas.height=sourceHeight;
-  const fullCtx=fullCanvas.getContext("2d",{willReadFrequently:true});
-  fullCtx.imageSmoothingEnabled=true;
-  fullCtx.drawImage(supportCanvas,0,0,sourceWidth,sourceHeight);
-  const fullData=fullCtx.getImageData(0,0,sourceWidth,sourceHeight).data;
+  const featherCanvas=document.createElement("canvas");
+  featherCanvas.width=width;
+  featherCanvas.height=height;
+  const featherCtx=featherCanvas.getContext("2d",{willReadFrequently:true});
+  featherCtx.filter="blur(0.7px)";
+  featherCtx.drawImage(supportCanvas,0,0);
+  featherCtx.filter="none";
+  const featherData=featherCtx.getImageData(0,0,width,height).data;
 
-  const smart=new Uint8ClampedArray(personMask.length);
-  let added=0;
-  for(let i=0,p=3;i<smart.length;i++,p+=4){
-    const supportAlpha=fullData[p];
-    // Preserve the fine MODNet edge while adding connected support objects.
-    smart[i]=Math.max(personMask[i],supportAlpha>120?255:supportAlpha);
-    if(smart[i]>personMask[i]+20)added++;
+  for(let i=0,p=3;i<merged.length;i++,p+=4){
+    merged[i]=Math.max(personMask[i],featherData[p]);
   }
 
-  console.info("Smart subject diagnostics",{
-    addedPixels:added,
-    addedRatio:added/smart.length,
-    backgroundSample:[bgR,bgG,bgB],
-    workingSize:[width,height]
+  state.semanticLabels=keptLabels;
+
+  console.info("V5 semantic support diagnostics",{
+    keptLabels,
+    rejectedLabels:[...new Set(rejectedLabels)],
+    segmentCount:segments.length
   });
 
-  return smart;
+  return merged;
 }
 
-function applySubjectMode(mode){
+async function applySubjectMode(mode){
   state.subjectMode=mode;
-  state.mask=mode==="person"
-    ? cloneMask(state.personMask)
-    : cloneMask(state.smartMask||state.personMask);
 
   document.querySelectorAll("[data-subject-mode]").forEach(button=>{
     button.classList.toggle("active",button.dataset.subjectMode===mode);
   });
 
+  if(mode==="smart"&&!state.smartMask&&state.personMask&&state.sourceFile){
+    try{
+      setBusy(true,"Detecting chairs and support objects…");
+      const url=URL.createObjectURL(state.sourceFile);
+      try{
+        state.smartMask=await createSemanticSupportMask(state.personMask,url);
+      }finally{
+        URL.revokeObjectURL(url);
+      }
+      setBusy(false,"Person + support selected");
+    }catch(error){
+      setBusy(false,"Support-object detection failed");
+      showError(error);
+      state.subjectMode="person";
+    }
+  }
+
+  state.mask=state.subjectMode==="person"
+    ? cloneMask(state.personMask)
+    : cloneMask(state.smartMask||state.personMask);
+
   state.history=[];
   state.future=[];
   updateHistoryButtons();
   render();
-  setStatus(mode==="smart"?"Smart subject selected":"Person only selected");
+  setStatus(
+    state.subjectMode==="smart"
+      ? `Person + support selected${state.semanticLabels.length?`: ${state.semanticLabels.join(", ")}`:""}`
+      : "Person only selected"
+  );
 }
 
 async function removeBackground(){
@@ -381,11 +502,15 @@ async function removeBackground(){
     const url=URL.createObjectURL(state.sourceFile);
     try{
       state.personMask=await buildAlphaMask(url);
-      setStatus("Preserving connected support objects…");
-      state.smartMask=createSmartSubjectMask(state.personMask);
-      state.mask=state.subjectMode==="smart"
-        ? cloneMask(state.smartMask)
-        : cloneMask(state.personMask);
+
+      if(state.subjectMode==="smart"){
+        setStatus("Detecting chairs and support objects…");
+        state.smartMask=await createSemanticSupportMask(state.personMask,url);
+        state.mask=cloneMask(state.smartMask);
+      }else{
+        state.smartMask=null;
+        state.mask=cloneMask(state.personMask);
+      }
     }finally{
       URL.revokeObjectURL(url);
     }
@@ -573,7 +698,7 @@ els.bgInput.addEventListener("change",event=>loadBackground(event.target.files[0
 document.querySelectorAll(".mode-button[data-mode]").forEach(button=>button.addEventListener("click",()=>setMode(button.dataset.mode)));
 document.querySelectorAll("[data-subject-mode]").forEach(button=>button.addEventListener("click",()=>{
   if(!state.personMask)return;
-  applySubjectMode(button.dataset.subjectMode);
+  applySubjectMode(button.dataset.subjectMode).catch(showError);
 }));
 els.scale.addEventListener("input",()=>{state.subjectScale=Number(els.scale.value)/100;render()});
 $("#resetSubjectButton").addEventListener("click",resetSubject);

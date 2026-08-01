@@ -7,7 +7,7 @@
   <meta name="description" content="Remove and replace image backgrounds privately in your browser.">
   <meta name="theme-color" content="#ffffff">
   <title>Private Background Remover</title>
-  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=4.0.0">
+  <link rel="stylesheet" href="./assets/css/background-remover-v2.css?v=5.0.0">
 </head>
 <body>
   <header class="app-header">
@@ -19,7 +19,7 @@
       <a href="./">Scanner</a>
       <a class="active" href="./background-remover.html">Remove Background</a>
     </nav>
-    <div class="privacy"><span></span>Processed locally · V4</div>
+    <div class="privacy"><span></span>Processed locally · V5</div>
   </header>
 
   <main>
@@ -33,7 +33,7 @@
         Choose image
       </label>
       <div id="dropZone" class="drop-zone" tabindex="0">or drop an image here</div>
-      <p class="first-run">The first run downloads and caches the portrait-matting model. <strong>Build V4</strong></p>
+      <p class="first-run">The first run downloads and caches the portrait-matting model. <strong>Build V5</strong></p>
     </section>
 
     <section id="workspaceView" class="workspace hidden">
@@ -120,9 +120,9 @@
             </div>
             <div class="mode-buttons extraction-modes">
               <button id="personOnlyButton" class="mode-button" data-subject-mode="person" type="button">Person only</button>
-              <button id="smartSubjectButton" class="mode-button active" data-subject-mode="smart" type="button">Smart subject</button>
+              <button id="smartSubjectButton" class="mode-button active" data-subject-mode="smart" type="button">Person + support</button>
             </div>
-            <p class="control-help">Smart subject keeps connected support objects such as a chair or wheelchair while rejecting detached objects.</p>
+            <p class="control-help">Smart subject uses a second local AI model to keep recognised support objects such as chairs and sofas while rejecting walls, floors, curtains and unrelated objects.</p>
           </section>
 
           <section class="panel-card">
@@ -207,6 +207,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./assets/js/background/app-v2.js?v=4.0.0"></script>
+  <script type="module" src="./assets/js/background/app-v2.js?v=5.0.0"></script>
 </body>
 </html>

@@ -1,0 +1,40 @@
+BACKGROUND REMOVER V5 — SEMANTIC SUPPORT OBJECTS
+
+V5 removes the V4 connected-region heuristic.
+
+Pipeline:
+1. MODNet creates the fine person alpha matte.
+2. SegFormer ADE20K classifies scene objects locally.
+3. Only approved support classes such as chair, armchair, sofa,
+   stool, seat and bench are considered.
+4. A support mask is merged only when it touches or closely overlaps
+   the detected person.
+5. Walls, floors, curtains, windows and unrelated objects are excluded.
+
+The first Person + support run downloads a second cached model and will
+therefore take longer than Person only.
+
+DEPLOY
+
+1. Copy all extracted files into D:\cam and replace existing files.
+2. Keep D:\cam\.git unchanged.
+3. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Replace smart subject heuristic with semantic support segmentation"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=5.0.0
+
+The header must show:
+
+Processed locally · V5
