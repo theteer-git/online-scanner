@@ -1,5 +1,5 @@
 const $=selector=>document.querySelector(selector);
-console.info("Background Remover V10.4 quantized multithread build loaded");
+console.info("Background Remover V10.4.1 blob-script CSP build loaded");
 
 const els={
   input:$("#imageInput"),drop:$("#dropZone"),welcome:$("#welcomeView"),workspace:$("#workspaceView"),
@@ -344,7 +344,7 @@ async function buildProfessionalOrFallbackMask(sourceUrl){
       backend:"MVANet q8 WASM"
     };
   }catch(error){
-    console.warn("V10.3 MVANet unavailable; using MODNet fallback.",error);
+    console.warn("V10.4.1 MVANet unavailable; using MODNet fallback.",error);
     state.mvanetSegmenter=null;
     state.professionalBackend="MODNet fallback";
     setStatus("Quality model unavailable; using fast mode…");

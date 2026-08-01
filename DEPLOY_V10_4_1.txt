@@ -1,0 +1,46 @@
+BACKGROUND REMOVER V10.4.1 — BLOB SCRIPT CSP HOTFIX
+
+Cause:
+ONNX Runtime's multithreaded WASM backend dynamically imports a temporary
+blob: JavaScript module. V10.4 allowed blob: for workers and connections,
+but not for script-src, so the browser blocked the backend.
+
+Fix:
+- script-src now includes blob:
+- script-src-elem explicitly includes blob:
+- q8 MODNet remains unchanged
+- multithreaded WASM remains enabled
+- cross-origin isolation remains enabled
+
+DEPLOY
+
+1. Extract the ZIP.
+2. Replace the files inside D:\cam.
+3. Keep D:\cam\.git unchanged.
+4. Ensure D:\cam\_redirects does not exist.
+
+Run:
+
+cd /d D:\cam
+git add -A
+git commit -m "Allow ONNX WASM blob script modules"
+git push
+
+After Cloudflare deployment:
+
+node verify-background-remover.mjs
+
+Expected:
+PASS .../background-remover?v=10.4.1
+PASS .../assets/js/background/app-v2.js?v=10.4.1
+PASS CSP blob scripts
+PASS isolation headers
+Background Remover V10.4.1 deployment verified.
+
+Open:
+
+https://online-scanner.pages.dev/background-remover?v=10.4.1
+
+Required marker:
+
+Processed locally · V10.4.1

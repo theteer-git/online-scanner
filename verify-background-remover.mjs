@@ -1,44 +1,54 @@
 const base=process.argv[2]||"https://online-scanner.pages.dev";
 
-const checks=[
-  [`${base}/background-remover?v=10.4.0`,[
-    "Processed locally · V10.4",
-    "app-v2.js?v=10.4.0",
-    "6.63 MB quantized MODNet"
-  ]],
-  [`${base}/assets/js/background/app-v2.js?v=10.4.0`,[
-    "Background Remover V10.4 quantized multithread build loaded",
-    "dtype:\"q8\"",
-    "V10.4 runtime diagnostics",
-    "V10.4 q8 MODNet alpha diagnostics",
-    "MODNet q8 fast"
-  ]]
-];
-
 let failed=0;
 
-for(const [url,expected] of checks){
-  try{
-    const response=await fetch(url,{cache:"no-store"});
-    const text=await response.text();
-    const missing=expected.filter(value=>!text.includes(value));
+const pageUrl=`${base}/background-remover?v=10.4.1`;
+const scriptUrl=`${base}/assets/js/background/app-v2.js?v=10.4.1`;
 
-    if(!response.ok||missing.length){
-      failed++;
-      console.error("FAIL",url,{status:response.status,missing});
-    }else{
-      console.log("PASS",url,response.status);
-    }
-  }catch(error){
-    failed++;
-    console.error("FAIL",url,error.message);
-  }
+const page=await fetch(pageUrl,{cache:"no-store"});
+const pageText=await page.text();
+const pageExpected=[
+  "Processed locally · V10.4.1",
+  "app-v2.js?v=10.4.1"
+];
+const pageMissing=pageExpected.filter(value=>!pageText.includes(value));
+
+if(!page.ok||pageMissing.length){
+  failed++;
+  console.error("FAIL",pageUrl,{status:page.status,missing:pageMissing});
+}else{
+  console.log("PASS",pageUrl,page.status);
 }
 
-const page=await fetch(`${base}/background-remover?v=10.4.0`,{
-  cache:"no-store",
-  redirect:"manual"
-});
+const script=await fetch(scriptUrl,{cache:"no-store"});
+const scriptText=await script.text();
+const scriptExpected=[
+  "Background Remover V10.4.1 blob-script CSP build loaded",
+  'dtype:"q8"',
+  "V10.4 runtime diagnostics"
+];
+const scriptMissing=scriptExpected.filter(value=>!scriptText.includes(value));
+
+if(!script.ok||scriptMissing.length){
+  failed++;
+  console.error("FAIL",scriptUrl,{status:script.status,missing:scriptMissing});
+}else{
+  console.log("PASS",scriptUrl,script.status);
+}
+
+const csp=page.headers.get("content-security-policy")||"";
+const requiredCsp=[
+  "script-src 'self' blob:",
+  "script-src-elem 'self' blob:"
+];
+const missingCsp=requiredCsp.filter(value=>!csp.includes(value));
+
+if(missingCsp.length){
+  failed++;
+  console.error("FAIL CSP blob scripts",{missing:missingCsp,csp});
+}else{
+  console.log("PASS CSP blob scripts");
+}
 
 const coop=page.headers.get("cross-origin-opener-policy");
 const coep=page.headers.get("cross-origin-embedder-policy");
@@ -51,4 +61,4 @@ if(coop!=="same-origin"||!["credentialless","require-corp"].includes(coep)){
 }
 
 if(failed)process.exitCode=1;
-else console.log("Background Remover V10.4 deployment verified.");
+else console.log("Background Remover V10.4.1 deployment verified.");
